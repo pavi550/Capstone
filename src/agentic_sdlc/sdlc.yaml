@@ -1,0 +1,97 @@
+# Default configuration for the Agentic SDLC framework.
+# Copy this file, override what you need, and pass it with `--config my.yaml`.
+# Secrets are never stored here: every credential is read from the env var named by `*_env`.
+
+project:
+  name: agentic-sdlc
+  output_dir: .agentic_sdlc/runs      # run artifacts: events.jsonl, review-*.json, DoD docs
+
+llm:
+  provider: stub                      # stub | openai  (openai = any OpenAI-compatible endpoint)
+  model: gpt-4o
+  base_url: https://api.openai.com/v1 # Azure / Ollama / vLLM: point at their OpenAI-compatible URL
+  api_key_env: OPENAI_API_KEY
+  api_key_header: Authorization       # Azure OpenAI uses "api-key"
+  api_version: null                   # Azure only, appended as ?api-version=
+  temperature: 0.0
+  timeout: 120
+
+jira:
+  enabled: false
+  base_url: null                      # e.g. https://your-domain.atlassian.net
+  user_env: JIRA_USER
+  token_env: JIRA_TOKEN
+  jql: null                           # e.g. project = CAP AND status = "To Do"
+  search_path: /rest/api/2/search     # Jira Cloud (2025+): /rest/api/3/search/jql
+  max_results: 50
+  issues_file: null                   # offline alternative: Jira JSON export
+  defect_project: null                # project key for regression defects
+  defect_issuetype: Bug
+
+knowledge_base:
+  store: json                         # json | chroma
+  path: knowledge_base.json           # relative to the run output dir
+  top_k: 3
+  chroma:
+    path: .agentic_sdlc/chroma
+    collection: requirements
+    embedding: default                # default | openai
+
+hitl:
+  mode: auto                          # auto (approve listed gates) | interactive (prompt on stdin)
+  auto_approve: [requirements_signoff, merge, deploy]
+
+guardrails:
+  require_repo: true
+  restricted_paths: [".git/", ".github/workflows/", "secrets/", ".env", "id_rsa"]
+  test_paths: ["tests/", "test/", "__tests__/", "src/test/"]
+  max_file_bytes: 200000
+  allowed_mcp: [gerrit]
+  secret_patterns:
+    - "AKIA[0-9A-Z]{16}"
+    - "-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----"
+    - "ghp_[A-Za-z0-9]{36}"
+    - "xox[baprs]-[A-Za-z0-9-]{10,}"
+    - "(?i)(password|passwd|secret|api[_-]?key|token)\\s*[:=]\\s*['\"][^'\"\\s]{8,}['\"]"
+
+loops:
+  max_fix_iterations: 3               # test-fail -> triage -> fix cycles per requirement
+  max_review_iterations: 2            # review-fail -> fix -> re-review cycles per requirement
+  max_ci_iterations: 2                # regression-fail -> defect -> fix cycles per run
+  max_steps: 500                      # hard stop for the state machine
+
+quality:
+  min_coverage: null                  # e.g. 80 (percent); null disables the coverage gate
+  review_threshold: 0.7               # minimum quality score (0..1) to pass review
+  block_severities: [critical, high]  # any consensus finding at these severities fails review
+
+review:
+  external_tools: auto                # auto (use installed bandit/semgrep/pip-audit) | none | list
+  ensemble:
+    weights: {rules: 0.6, llm: 0.4}
+    threshold: 0.5                    # weighted vote share needed to keep a finding
+    always_keep: [critical, high]
+
+repo:
+  build_command: null                 # override auto-detected commands (string or list; "none" disables)
+  test_command: null
+  lint_command: null
+
+vcs:
+  mode: dry-run                       # dry-run | git | gerrit
+  remote: origin
+  branch: main
+  branch_prefix: agentic/
+  gerrit:
+    url: null                         # e.g. https://gerrit.example.com
+    user_env: GERRIT_USER
+    token_env: GERRIT_HTTP_PASSWORD
+    auto_submit: false                # vote Code-Review +2 and submit after HITL approval
+
+ci:
+  command: null                       # e.g. "jenkins-cli build my-job -s"; null = full test suite
+
+deploy:
+  environments: [dev, qa, staging, prod]
+  command: null                       # template, e.g. "helm upgrade app ./chart -n {env}"
+  dry_run: true

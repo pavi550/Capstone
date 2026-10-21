@@ -1,0 +1,10 @@
+{
+  "items": [
+    {"id": "sql-injection", "truth": true, "predictions": {"rules": true, "llm": true}},
+    {"id": "hard-coded-token", "truth": true, "predictions": {"rules": true, "llm": false}},
+    {"id": "missing-ac-trace", "truth": true, "predictions": {"rules": false, "llm": true}},
+    {"id": "style-nit", "truth": false, "predictions": {"rules": false, "llm": true}},
+    {"id": "false-positive-md5-cache-key", "truth": false, "predictions": {"rules": true, "llm": false}},
+    {"id": "clean-file", "truth": false, "predictions": {"rules": false, "llm": false}}
+  ]
+}
