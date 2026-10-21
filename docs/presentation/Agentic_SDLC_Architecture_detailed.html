@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agentic SDLC – High-Level Architecture</title>
+<style>
+  :root {
+    --navy: #1F4E79; --purple: #5B3A99; --teal: #127A6A; --grey: #404040;
+    --orange: #C55A11; --green: #38761D; --gold: #B7860B;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", Arial, sans-serif; background: #EEF2F7; color: #1F2937; }
+  header { background: var(--navy); color: #fff; padding: 16px 28px; }
+  header h1 { margin: 0; font-size: 24px; }
+  header p { margin: 6px 0 0; color: #CFE0F5; font-size: 14px; }
+  header a { color: #fff; }
+  .toolbar { padding: 10px 28px; background: #fff; border-bottom: 1px solid #DDE3EA; font-size: 13px; }
+  .toolbar button {
+    border: 1px solid var(--navy); background: #fff; color: var(--navy);
+    padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; margin-right: 8px;
+  }
+  .toolbar button:hover { background: var(--navy); color: #fff; }
+
+  .page { max-width: 1500px; margin: 0 auto; padding: 22px 28px 40px; }
+  .arch { display: grid; grid-template-columns: 190px minmax(0, 1fr) 190px; gap: 16px; align-items: stretch; }
+  .stack { display: flex; flex-direction: column; gap: 0; min-width: 0; }
+  .box, .layer { min-width: 0; overflow-wrap: anywhere; }
+  @media (max-width: 1250px) {
+    .arch { grid-template-columns: minmax(0, 1fr); }
+    .side { flex-direction: row; flex-wrap: wrap; }
+    .side h2 { flex-basis: 100%; }
+    .side .box { flex: 1 1 160px; }
+    .graph { flex-wrap: wrap; row-gap: 8px; }
+    .graph .box { flex: 1 1 150px; }
+  }
+
+  .layer {
+    background: #fff; border: 2px solid; border-radius: 10px; padding: 12px 14px 14px;
+  }
+  .layer h2 { margin: 0 0 10px; font-size: 14.5px; letter-spacing: .2px; }
+  .layer h2 small { font-weight: 400; color: #555; font-size: 12.5px; margin-left: 6px; }
+  .row { display: grid; gap: 10px; grid-auto-columns: minmax(0, 1fr); }
+  .box {
+    border: 1.5px solid; border-radius: 8px; padding: 8px 10px; font-size: 12.5px; line-height: 1.35;
+  }
+  .box b { display: block; font-size: 13px; margin-bottom: 2px; }
+  .owner { display: inline-block; margin-top: 4px; font-size: 11px; font-weight: 700;
+           padding: 1px 6px; border-radius: 10px; background: #fff; border: 1px solid currentColor; }
+
+  .l-src   { border-color: var(--navy); }   .l-src h2 { color: var(--navy); }
+  .l-src .box   { background: #DCE8F7; border-color: var(--navy); }
+  .l-ctx   { border-color: var(--teal); }   .l-ctx h2 { color: var(--teal); }
+  .l-ctx .box   { background: #DDF2EE; border-color: var(--teal); }
+  .l-orch  { border-color: var(--purple); } .l-orch h2 { color: var(--purple); }
+  .l-orch .box  { background: #E8E0F5; border-color: var(--purple); }
+  .l-model { border-color: var(--gold); }   .l-model h2 { color: var(--gold); }
+  .l-model .box { background: #FFF2CC; border-color: var(--gold); }
+  .l-tool  { border-color: var(--grey); }   .l-tool h2 { color: var(--grey); }
+  .l-tool .box  { background: #EDEDED; border-color: var(--grey); }
+  .l-del   { border-color: var(--green); }  .l-del h2 { color: var(--green); }
+  .l-del .box   { background: #E2F0D9; border-color: var(--green); }
+
+  .graph { display: flex; align-items: stretch; gap: 0; }
+  .graph .box { flex: 1; }
+  .graph .arrow { align-self: center; padding: 0 6px; font-size: 18px; color: var(--purple); font-weight: 700; }
+  .l-orch .box.orchestrator {
+    background: var(--purple); color: #fff; text-align: center; padding: 10px 14px;
+  }
+  .l-orch .box.orchestrator b { font-size: 14px; }
+  .directs { text-align: center; font-size: 12px; font-weight: 600; color: var(--purple); padding: 6px 0; }
+  .swe {
+    margin-top: 10px; border: 1.5px dashed var(--purple); border-radius: 8px; padding: 8px 10px 10px;
+  }
+  .swe-title { font-size: 12.5px; font-weight: 700; color: var(--purple); margin-bottom: 8px; }
+  .l-orch .swe .box { background: #F4EFFB; }
+  .loopnote {
+    margin-top: 8px; font-size: 12px; color: #E67E22; font-weight: 600;
+    border-top: 2px dashed #E67E22; padding-top: 6px;
+  }
+
+  .flow {
+    text-align: center; font-size: 12px; color: #555; padding: 5px 0; font-weight: 600;
+  }
+  .flow::before { content: "▼ "; color: var(--navy); }
+
+  .side {
+    background: #fff; border: 2px solid; border-radius: 10px; padding: 12px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .side h2 { margin: 0 0 4px; font-size: 14px; writing-mode: horizontal-tb; }
+  .side .box { font-size: 12px; }
+  .side.gov { border-color: var(--orange); }
+  .side.gov h2 { color: var(--orange); }
+  .side.gov .box { background: #FCE4D6; border-color: var(--orange); }
+  .side.obs { border-color: var(--navy); }
+  .side.obs h2 { color: var(--navy); }
+  .side.obs .box { background: #F3F6FA; border-color: #8FA8C4; }
+
+  .notes {
+    margin-top: 20px; background: #fff; border: 1px solid #DDE3EA; border-radius: 10px;
+    padding: 14px 20px; font-size: 13px;
+  }
+  .notes h3 { margin: 0 0 8px; color: var(--navy); font-size: 15px; }
+  .notes ol { margin: 0; padding-left: 20px; line-height: 1.6; }
+  .notes p { margin: 4px 0 10px; line-height: 1.5; }
+  .notes dl { margin: 0; display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 8px 16px; }
+  .notes dt { font-weight: 700; color: var(--orange); }
+  .notes dd { margin: 0; line-height: 1.5; }
+  .notes dd i { color: #555; }
+  .notes table { border-collapse: collapse; margin-top: 12px; width: 100%; }
+  .notes th, .notes td { border: 1px solid #DDE3EA; padding: 6px 10px; text-align: left; vertical-align: top; }
+  .notes th { background: #FCE4D6; color: var(--orange); }
+  @media (max-width: 800px) { .notes dl { grid-template-columns: minmax(0, 1fr); } }
+
+  @media print {
+    header, .toolbar { display: none; }
+    body { background: #fff; }
+    .page { padding: 0; max-width: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Agentic SDLC – High-Level Architecture</h1>
+  <p>Jira-driven, RAG-grounded, LangGraph-orchestrated code generation, run for every Jira ID ·
+     <a href="Agentic_SDLC_Flow.html">View detailed flow diagram</a></p>
+</header>
+
+<div class="toolbar">
+  <button onclick="window.print()">Print / Save as PDF</button>
+</div>
+
+<div class="page">
+  <div class="arch">
+
+    <!-- Left: governance spans all layers -->
+    <aside class="side gov">
+      <h2>Governance &amp; HITL</h2>
+      <div class="box"><b>Human-in-the-Loop</b>Requirement sign-off, repo path, Gerrit approvals</div>
+      <div class="box"><b>Guardrails</b>Repo access &amp; permissions, MCP tool approvals</div>
+      <div class="box"><b>Coding Standards</b>Style &amp; policy rules fed to agents</div>
+      <div class="box"><b>Quality Gates</b>Test pass, review score threshold, DoD checklist</div>
+      <div class="box"><b>Sandboxing</b>Agents act only on approved repos / branches</div>
+    </aside>
+
+    <!-- Centre: layered architecture -->
+    <main class="stack">
+
+      <section class="layer l-src">
+        <h2>1. Sources &amp; Work Intake</h2>
+        <div class="row" style="grid-template-columns: repeat(4, 1fr);">
+          <div class="box"><b>Jira Dashboard</b>Epics / stories; one pipeline run per Jira ID</div>
+          <div class="box"><b>Confluence / Documents</b>Business requirements, designs</div>
+          <div class="box"><b>Coding Standards</b>Team guidelines, templates</div>
+          <div class="box"><b>Source Repository</b>Existing codebase (private Git)</div>
+        </div>
+      </section>
+
+      <div class="flow">push requirement + documents</div>
+
+      <section class="layer l-ctx">
+        <h2>2. Context Layer (RAG)<small>grounds every agent in the right requirement</small></h2>
+        <div class="row" style="grid-template-columns: repeat(4, 1fr);">
+          <div class="box"><b>Ingestion &amp; Chunking</b>Parse Jira, docs, code; split into chunks</div>
+          <div class="box"><b>Embedding</b>Convert chunks into vectors</div>
+          <div class="box"><b>Vector DB – ChromaDB</b>Stores requirement &amp; code context</div>
+          <div class="box"><b>Retriever / Knowledge Base</b>Top-k context per Jira ID for agents</div>
+        </div>
+      </section>
+
+      <div class="flow">retrieved context per Jira ID</div>
+
+      <section class="layer l-orch">
+        <h2>3. Agent Orchestration (LangGraph)<small>stateful graph per Jira ID</small></h2>
+        <div class="box orchestrator">
+          <b>Orchestrator Agent – AI Project Manager</b>
+          Interprets the epics, breaks them into tasks, decides what each agent does,
+          coordinates hand-offs and loops, and tracks progress per Jira ID
+        </div>
+        <div class="directs">▼ assigns tasks &amp; decides next step for each agent</div>
+        <div class="graph">
+          <div class="box"><b>Coding Agent + SWE bots</b>Standards + RAG context; LLM writes code per requirement</div>
+          <div class="arrow">→</div>
+          <div class="box"><b>Test Agent</b>Test scenarios &amp; cases per requirement; runs tests</div>
+          <div class="arrow">→</div>
+          <div class="box"><b>Review Agent</b>Security, requirement-pattern, ensemble review</div>
+          <div class="arrow">→</div>
+          <div class="box"><b>Quality Scoring</b>Accuracy, precision, recall, F1</div>
+        </div>
+        <div class="swe">
+          <div class="swe-title">SWE bots inside the Coding Agent (run per Jira ID)</div>
+          <div class="row" style="grid-template-columns: repeat(4, 1fr);">
+            <div class="box"><b>Code Navigator bot</b>Searches the repo, finds files to change</div>
+            <div class="box"><b>Code Editor bot</b>Makes multi-file edits from the plan</div>
+            <div class="box"><b>Build &amp; Run bot</b>Compiles, runs the code and unit tests</div>
+            <div class="box"><b>Fix &amp; Refactor bot</b>Reads errors, lints, self-repairs code</div>
+          </div>
+        </div>
+        <div class="loopnote">Requirement loop: the Coding Agent and Test Agent iterate over every requirement of the epic until all are implemented and tests pass, then hand over to review</div>
+        <div class="loopnote" style="border-top:none; margin-top:2px; padding-top:0;">Feedback loops: test failure → re-code / fix tests / update KB · review below threshold → code refinement</div>
+      </section>
+
+      <div class="flow">prompts, tool calls</div>
+
+      <div class="row" style="grid-template-columns: 1fr 1fr; gap: 16px;">
+        <section class="layer l-model">
+          <h2>4. Model Layer</h2>
+          <div class="row" style="grid-template-columns: 1fr 1fr;">
+            <div class="box"><b>Foundation LLMs</b>Code generation, planning, review</div>
+            <div class="box"><b>Embedding Model</b>Vectors for the RAG layer</div>
+          </div>
+        </section>
+        <section class="layer l-tool">
+          <h2>5. Tools &amp; Integrations (MCP)</h2>
+          <div class="row" style="grid-template-columns: 1fr 1fr;">
+            <div class="box"><b>Jira / Confluence MCP</b>Read items, update status</div>
+            <div class="box"><b>Git / Gerrit MCP</b>Branches, patch sets</div>
+            <div class="box"><b>Test Runner</b>Unit &amp; regression tests</div>
+            <div class="box"><b>Security Scanners</b>SAST, secrets, CVE scan, OWASP (explained below)</div>
+          </div>
+        </section>
+      </div>
+
+      <div class="flow">approved change</div>
+
+      <section class="layer l-del">
+        <h2>6. Delivery</h2>
+        <div class="graph">
+          <div class="box"><b>Private Git / Gerrit</b>Patch set + HITL approval</div>
+          <div class="arrow" style="color:var(--green)">→</div>
+          <div class="box"><b>CI/CD Pipeline</b>Build + full regression</div>
+          <div class="arrow" style="color:var(--green)">→</div>
+          <div class="box"><b>Documentation (DoD)</b>README, release notes, traceability</div>
+          <div class="arrow" style="color:var(--green)">→</div>
+          <div class="box"><b>Deployment</b>Dev → QA → Staging → Prod</div>
+          <div class="arrow" style="color:var(--green)">→</div>
+          <div class="box"><b>Jira Closure</b>Status update linked to commit</div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Right: observability spans all layers -->
+    <aside class="side obs">
+      <h2>Observability &amp; Traceability</h2>
+      <div class="box"><b>Traceability</b>Jira ID ↔ context ↔ code ↔ tests ↔ release</div>
+      <div class="box"><b>Agent Run Logs</b>LangGraph state, prompts, tool calls</div>
+      <div class="box"><b>Metrics</b>Quality scores, pass rates, cycle time</div>
+      <div class="box"><b>Audit Trail</b>Who approved what, and when</div>
+    </aside>
+  </div>
+
+  <div class="notes">
+    <h3>End-to-end flow for each Jira ID</h3>
+    <ol>
+      <li>A work item is picked from the <b>Jira Dashboard</b>.</li>
+      <li>Its requirement (plus linked documents) is pushed into the <b>RAG</b> pipeline, embedded, and stored in the <b>Vector DB (ChromaDB)</b>.</li>
+      <li>The <b>LangGraph</b> graph starts: the <b>Orchestrator Agent</b> (AI Project Manager) interprets the epic, splits it into tasks and decides what each agent does, and the Coding Agent retrieves context from the Vector DB and applies the coding standards.</li>
+      <li>The Coding Agent's <b>SWE bots</b> navigate the repo, edit files, build and run the code, and self-repair errors until the task is done.</li>
+      <li>The <b>LLM</b> generates the code; the Test Agent builds and runs tests in parallel. Both agents repeat this for <b>every requirement</b> until all are implemented and passing.</li>
+      <li>The Review Agent scores the change; failures loop back to coding, tests, or the knowledge base.</li>
+      <li>Approved changes go to <b>Gerrit</b> (HITL), then CI/CD, documentation, and deployment; the Jira item is closed with full traceability.</li>
+    </ol>
+  </div>
+
+  <div class="notes">
+    <h3>Security checks explained (Review Agent – 7a Security Code Review)</h3>
+    <p>These checks run on the generated code before it is merged. They look for security holes, not functional bugs.</p>
+    <dl>
+      <dt>SAST<br><small>Static Application Security Testing</small></dt>
+      <dd>Reads the source code without running it and flags insecure patterns, e.g. SQL built from user input
+        (SQL injection), shell commands built from input, weak encryption. <i>Tools: SonarQube, Semgrep, Bandit, Checkmarx.</i></dd>
+
+      <dt>Secrets scan</dt>
+      <dd>Finds passwords, API keys, tokens or private keys hard-coded in code or config files – important because
+        AI-generated code can include credentials. <i>Tools: detect-secrets, Gitleaks, TruffleHog.</i></dd>
+
+      <dt>Dependency / CVE scan<br><small>also called SCA – Software Composition Analysis</small></dt>
+      <dd>A <b>CVE</b> (Common Vulnerabilities and Exposures) is a publicly listed, numbered flaw in a specific
+        software version, e.g. CVE-2021-44228 “Log4Shell” in Log4j. The scan checks every third-party library
+        version against the CVE database and reports the fixed version.
+        <i>Tools: pip-audit, npm audit, OWASP Dependency-Check, Snyk, Trivy.</i></dd>
+
+      <dt>OWASP checks<br><small>Open Worldwide Application Security Project</small></dt>
+      <dd>Reviews the application against the <b>OWASP Top 10</b> – the most common web risks such as broken access
+        control, injection, cryptographic failures, security misconfiguration and vulnerable components.
+        Because this flow uses LLM agents, the <b>OWASP Top 10 for LLM Applications</b> (prompt injection,
+        excessive agency, etc.) also applies.</dd>
+
+      <dt>Related (after deployment)</dt>
+      <dd><b>DAST</b> (Dynamic Application Security Testing) attacks the running app from outside;
+        <b>penetration testing</b> is a manual simulated attack. These run against deployed environments, not in 7a.</dd>
+    </dl>
+    <table>
+      <tr><th>Check</th><th>Looks at</th><th>Question it answers</th></tr>
+      <tr><td>SAST</td><td>Our own code</td><td>Did we write insecure code?</td></tr>
+      <tr><td>Secrets scan</td><td>Code &amp; config files</td><td>Did we leak a password or key?</td></tr>
+      <tr><td>Dependency / CVE scan</td><td>Third-party libraries</td><td>Are we using a library with a known hole?</td></tr>
+      <tr><td>OWASP checks</td><td>The whole application</td><td>Are we exposed to the most common attack types?</td></tr>
+    </table>
+  </div>
+</div>
+
+</body>
+</html>

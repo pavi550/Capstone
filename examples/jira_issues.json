@@ -1,0 +1,11 @@
+{
+  "issues": [
+    {
+      "key": "CAP-101",
+      "fields": {
+        "summary": "Divide two numbers",
+        "description": "The calculator must support division.\nAcceptance criteria:\n- divide returns the quotient of two numbers\n- divide by zero raises an error"
+      }
+    }
+  ]
+}

@@ -1,0 +1,264 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1030" viewBox="0 0 1920 1030" font-family="Segoe UI, Arial, sans-serif">
+<defs>
+<linearGradient id="g_start" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#34D399"/><stop offset="1" stop-color="#059669"/></linearGradient>
+<linearGradient id="g_ticket" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#64748B"/><stop offset="1" stop-color="#334155"/></linearGradient>
+<linearGradient id="g_human" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#FBBF24"/><stop offset="1" stop-color="#D97706"/></linearGradient>
+<linearGradient id="g_orch" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2563EB"/><stop offset="1" stop-color="#1E3A8A"/></linearGradient>
+<linearGradient id="g_s1" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#38BDF8"/><stop offset="1" stop-color="#0284C7"/></linearGradient>
+<linearGradient id="g_s2" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#22D3EE"/><stop offset="1" stop-color="#0891B2"/></linearGradient>
+<linearGradient id="g_s3" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2DD4BF"/><stop offset="1" stop-color="#0D9488"/></linearGradient>
+<linearGradient id="g_s4" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#4ADE80"/><stop offset="1" stop-color="#16A34A"/></linearGradient>
+<linearGradient id="g_s5" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#FB923C"/><stop offset="1" stop-color="#EA580C"/></linearGradient>
+<linearGradient id="g_s6" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#FB7185"/><stop offset="1" stop-color="#E11D48"/></linearGradient>
+<linearGradient id="g_s7" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#E879F9"/><stop offset="1" stop-color="#C026D3"/></linearGradient>
+<linearGradient id="g_s8" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#818CF8"/><stop offset="1" stop-color="#4F46E5"/></linearGradient>
+<linearGradient id="g_gov" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#8B5CF6"/><stop offset="1" stop-color="#6D28D9"/></linearGradient>
+<linearGradient id="g_end" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#1E293B"/><stop offset="1" stop-color="#0F172A"/></linearGradient>
+<linearGradient id="g_metrics" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#CCFBF1"/><stop offset="1" stop-color="#99F6E4"/></linearGradient>
+<filter id="shadow" x="-10%" y="-10%" width="120%" height="140%"><feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#0F172A" flood-opacity="0.12"/></filter>
+<pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.1" fill="#E2E8F0"/></pattern>
+<marker id="m_dark" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#334155"/></marker>
+<marker id="m_red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#DC2626"/></marker>
+<marker id="m_green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#16A34A"/></marker>
+<marker id="m_grey" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#94A3B8"/></marker>
+</defs>
+<rect x="0" y="0" width="1920" height="1030" rx="0" fill="#F8FAFC"/>
+<rect x="0" y="0" width="1920" height="1030" rx="0" fill="url(#dots)"/>
+<text x="40" y="52" font-size="30" font-weight="800" fill="#0F172A" text-anchor="start" >Governed Agentic SDLC — From Ticket to Merge</text>
+<text x="40" y="80" font-size="15" font-weight="400" fill="#475569" text-anchor="start" >Human supervisor · orchestrator · stage agents · always-on governance · CI and human gates on private repositories</text>
+<text x="1880" y="52" font-size="14" font-weight="600" fill="#64748B" text-anchor="end" >M.Tech Capstone · Team 4</text>
+<rect x="40" y="115" width="130" height="70" rx="35" fill="url(#g_start)" filter="url(#shadow)"/>
+<text x="105" y="157" font-size="20" font-weight="800" fill="#FFFFFF" text-anchor="middle" letter-spacing="2">START</text>
+<rect x="210" y="100" width="350" height="100" rx="14" fill="#FFFFFF" filter="url(#shadow)"/>
+<path d="M210,130 V114 A14,14 0 0 1 224,100 H546 A14,14 0 0 1 560,114 V130 Z" fill="url(#g_ticket)"/>
+<text x="226" y="119.5" font-size="13" font-weight="700" fill="#FFFFFF" text-anchor="start" letter-spacing="1.2">TICKET / REQUIREMENT</text>
+<text x="226" y="160" font-size="16" font-weight="700" fill="#0F172A" text-anchor="start" >Jira or GitHub Issue</text>
+<text x="226" y="184" font-size="13" font-weight="400" fill="#475569" text-anchor="start" >what must change, and why</text>
+<rect x="600" y="100" width="400" height="100" rx="14" fill="#FFFFFF" filter="url(#shadow)"/>
+<path d="M600,130 V114 A14,14 0 0 1 614,100 H986 A14,14 0 0 1 1000,114 V130 Z" fill="url(#g_human)"/>
+<text x="616" y="119.5" font-size="13" font-weight="700" fill="#FFFFFF" text-anchor="start" letter-spacing="1.2">HUMAN SUPERVISOR</text>
+<polygon points="978,108 985,115 978,122 971,115" fill="#FFFFFF"/>
+<text x="616" y="160" font-size="16" font-weight="700" fill="#0F172A" text-anchor="start" >Sets intent, constraints &amp; DoD</text>
+<text x="616" y="184" font-size="13" font-weight="400" fill="#475569" text-anchor="start" >keeps authority over scope, design and merge</text>
+<rect x="1040" y="100" width="460" height="100" rx="14" fill="#FFFFFF" filter="url(#shadow)"/>
+<path d="M1040,130 V114 A14,14 0 0 1 1054,100 H1486 A14,14 0 0 1 1500,114 V130 Z" fill="url(#g_orch)"/>
+<text x="1056" y="119.5" font-size="13" font-weight="700" fill="#FFFFFF" text-anchor="start" letter-spacing="1.2">ORCHESTRATOR AGENT</text>
+<circle cx="1480" cy="115.0" r="10" fill="#FFFFFF" stroke="#7C3AED" stroke-width="2"/>
+<text x="1480" y="119.0" font-size="11" font-weight="800" fill="#7C3AED" text-anchor="middle" >G</text>
+<text x="1056" y="160" font-size="16" font-weight="700" fill="#0F172A" text-anchor="start" >Decomposes the goal, assigns stage agents</text>
+<text x="1056" y="184" font-size="13" font-weight="400" fill="#475569" text-anchor="start" >routes feedback and retries between stages</text>
+<rect x="40" y="240" width="1480" height="270" rx="20" fill="#F0F9FF" stroke="#7DD3FC" stroke-width="1.5"/>
+<text x="70" y="270" font-size="15" font-weight="800" fill="#0369A1" text-anchor="start" letter-spacing="0.5">PHASE 1 · Analysis &amp; Generation</text>
+<rect x="40" y="560" width="1480" height="270" rx="20" fill="#FFF7ED" stroke="#FDBA74" stroke-width="1.5"/>
+<text x="70" y="590" font-size="15" font-weight="800" fill="#C2410C" text-anchor="start" letter-spacing="0.5">PHASE 2 · Review &amp; Closure</text>
+<path d="M345,265 H1560" fill="none" stroke="#7C3AED" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="0.1 8"/>
+<path d="M305,585 H1560" fill="none" stroke="#7C3AED" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="0.1 8"/>
+<path d="M370,265 V306" fill="none" stroke="#7C3AED" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="0.1 6"/>
+<path d="M370,585 V626" fill="none" stroke="#7C3AED" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="0.1 6"/>
+<path d="M739,265 V306" fill="none" stroke="#7C3AED" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="0.1 6"/>
+<path d="M739,585 V626" fill="none" stroke="#7C3AED" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="0.1 6"/>
+<path d="M1108,265 V306" fill="none" stroke="#7C3AED" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="0.1 6"/>
+<path d="M1108,585 V626" fill="none" stroke="#7C3AED" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="0.1 6"/>
+<path d="M1477,265 V306" fill="none" stroke="#7C3AED" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="0.1 6"/>
+<path d="M1477,585 V626" fill="none" stroke="#7C3AED" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="0.1 6"/>
+<path d="M1500,150 H1560" fill="none" stroke="#7C3AED" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="0.1 8"/>
+<rect x="70" y="300" width="320" height="180" rx="14" fill="#FFFFFF" filter="url(#shadow)"/>
+<path d="M70,334 V314 A14,14 0 0 1 84,300 H376 A14,14 0 0 1 390,314 V334 Z" fill="url(#g_s1)"/>
+<text x="86" y="321.5" font-size="13" font-weight="700" fill="#FFFFFF" text-anchor="start" letter-spacing="1.2">STEP 1</text>
+<text x="352" y="321.5" font-size="12" font-weight="600" fill="#FFFFFF" text-anchor="end" fill-opacity="0.92">Req Agent</text>
+<circle cx="370" cy="317.0" r="10" fill="#FFFFFF" stroke="#7C3AED" stroke-width="2"/>
+<text x="370" y="321.0" font-size="11" font-weight="800" fill="#7C3AED" text-anchor="middle" >G</text>
+<text x="86" y="364" font-size="17" font-weight="700" fill="#0F172A" text-anchor="start" >Requirements + Codebase</text>
+<text x="86" y="388" font-size="13" font-weight="400" fill="#475569" text-anchor="start" >Reads ticket, Jira / Confluence docs and</text>
+<text x="86" y="406" font-size="13" font-weight="400" fill="#475569" text-anchor="start" >the repo; drafts scope and impacted files</text>
+<rect x="86" y="426" width="288" height="36" rx="18" fill="#FEF3C7" stroke="#F59E0B" stroke-width="1.5"/>
+<polygon points="108,436 116,444 108,452 100,444" fill="#F59E0B"/>
+<text x="126" y="449" font-size="12.5" font-weight="700" fill="#92400E" text-anchor="start" >Human gate — approves scope</text>
+<rect x="439" y="300" width="320" height="180" rx="14" fill="#FFFFFF" filter="url(#shadow)"/>
+<path d="M439,334 V314 A14,14 0 0 1 453,300 H745 A14,14 0 0 1 759,314 V334 Z" fill="url(#g_s2)"/>
+<text x="455" y="321.5" font-size="13" font-weight="700" fill="#FFFFFF" text-anchor="start" letter-spacing="1.2">STEP 2</text>
+<text x="721" y="321.5" font-size="12" font-weight="600" fill="#FFFFFF" text-anchor="end" fill-opacity="0.92">Design Agent</text>
+<circle cx="739" cy="317.0" r="10" fill="#FFFFFF" stroke="#7C3AED" stroke-width="2"/>
+<text x="739" y="321.0" font-size="11" font-weight="800" fill="#7C3AED" text-anchor="middle" >G</text>
+<text x="455" y="364" font-size="17" font-weight="700" fill="#0F172A" text-anchor="start" >Design Options</text>
+<text x="455" y="388" font-size="13" font-weight="400" fill="#475569" text-anchor="start" >Proposes architecture options, diagrams</text>
+<text x="455" y="406" font-size="13" font-weight="400" fill="#475569" text-anchor="start" >and an implementation + test plan</text>
+<rect x="455" y="426" width="288" height="36" rx="18" fill="#FEF3C7" stroke="#F59E0B" stroke-width="1.5"/>
+<polygon points="477,436 485,444 477,452 469,444" fill="#F59E0B"/>
+<text x="495" y="449" font-size="12.5" font-weight="700" fill="#92400E" text-anchor="start" >Human gate — selects design</text>
+<rect x="808" y="300" width="320" height="180" rx="14" fill="#FFFFFF" filter="url(#shadow)"/>
+<path d="M808,334 V314 A14,14 0 0 1 822,300 H1114 A14,14 0 0 1 1128,314 V334 Z" fill="url(#g_s3)"/>
+<text x="824" y="321.5" font-size="13" font-weight="700" fill="#FFFFFF" text-anchor="start" letter-spacing="1.2">STEP 3</text>
+<text x="1090" y="321.5" font-size="12" font-weight="600" fill="#FFFFFF" text-anchor="end" fill-opacity="0.92">Code Agent</text>
+<circle cx="1108" cy="317.0" r="10" fill="#FFFFFF" stroke="#7C3AED" stroke-width="2"/>
+<text x="1108" y="321.0" font-size="11" font-weight="800" fill="#7C3AED" text-anchor="middle" >G</text>
+<text x="824" y="364" font-size="17" font-weight="700" fill="#0F172A" text-anchor="start" >Code Generation</text>
+<text x="824" y="388" font-size="13" font-weight="400" fill="#475569" text-anchor="start" >ReAct loop over git, IDE and build tools;</text>
+<text x="824" y="406" font-size="13" font-weight="400" fill="#475569" text-anchor="start" >outputs a patch / draft pull request</text>
+<rect x="824" y="426" width="288" height="36" rx="18" fill="#CCFBF1" stroke="#2DD4BF" stroke-width="1.5"/>
+<text x="968.0" y="449" font-size="12.5" font-weight="700" fill="#115E59" text-anchor="middle" >Thought → Action → Observation</text>
+<rect x="1177" y="300" width="320" height="180" rx="14" fill="#FFFFFF" filter="url(#shadow)"/>
+<path d="M1177,334 V314 A14,14 0 0 1 1191,300 H1483 A14,14 0 0 1 1497,314 V334 Z" fill="url(#g_s4)"/>
+<text x="1193" y="321.5" font-size="13" font-weight="700" fill="#FFFFFF" text-anchor="start" letter-spacing="1.2">STEP 4</text>
+<text x="1459" y="321.5" font-size="12" font-weight="600" fill="#FFFFFF" text-anchor="end" fill-opacity="0.92">Test-Design Agent</text>
+<circle cx="1477" cy="317.0" r="10" fill="#FFFFFF" stroke="#7C3AED" stroke-width="2"/>
+<text x="1477" y="321.0" font-size="11" font-weight="800" fill="#7C3AED" text-anchor="middle" >G</text>
+<text x="1193" y="364" font-size="17" font-weight="700" fill="#0F172A" text-anchor="start" >Test Plan &amp; Cases</text>
+<text x="1193" y="388" font-size="13" font-weight="400" fill="#475569" text-anchor="start" >Writes unit, integration and regression</text>
+<text x="1193" y="406" font-size="13" font-weight="400" fill="#475569" text-anchor="start" >cases traced back to the requirement</text>
+<rect x="1193" y="426" width="288" height="36" rx="18" fill="#DCFCE7" stroke="#4ADE80" stroke-width="1.5"/>
+<text x="1337.0" y="449" font-size="12.5" font-weight="700" fill="#166534" text-anchor="middle" >Coverage mapped to the ticket</text>
+<rect x="1177" y="620" width="320" height="180" rx="14" fill="#FFFFFF" filter="url(#shadow)"/>
+<path d="M1177,654 V634 A14,14 0 0 1 1191,620 H1483 A14,14 0 0 1 1497,634 V654 Z" fill="url(#g_s5)"/>
+<text x="1193" y="641.5" font-size="13" font-weight="700" fill="#FFFFFF" text-anchor="start" letter-spacing="1.2">STEP 5</text>
+<text x="1459" y="641.5" font-size="12" font-weight="600" fill="#FFFFFF" text-anchor="end" fill-opacity="0.92">CI Runner</text>
+<circle cx="1477" cy="637.0" r="10" fill="#FFFFFF" stroke="#7C3AED" stroke-width="2"/>
+<text x="1477" y="641.0" font-size="11" font-weight="800" fill="#7C3AED" text-anchor="middle" >G</text>
+<text x="1193" y="684" font-size="17" font-weight="700" fill="#0F172A" text-anchor="start" >Test Execution in CI</text>
+<text x="1193" y="708" font-size="13" font-weight="400" fill="#475569" text-anchor="start" >Lint, pytest and security scan run on</text>
+<text x="1193" y="726" font-size="13" font-weight="400" fill="#475569" text-anchor="start" >every push of the draft pull request</text>
+<rect x="1193" y="746" width="139.0" height="36" rx="18" fill="#DCFCE7" stroke="#16A34A" stroke-width="1.5"/>
+<text x="1262.5" y="769" font-size="12.5" font-weight="700" fill="#166534" text-anchor="middle" >✓ pass → Step 6</text>
+<rect x="1342.0" y="746" width="139.0" height="36" rx="18" fill="#FEE2E2" stroke="#DC2626" stroke-width="1.5"/>
+<text x="1411.5" y="769" font-size="12.5" font-weight="700" fill="#991B1B" text-anchor="middle" >✕ fail → Step 3</text>
+<rect x="808" y="620" width="320" height="180" rx="14" fill="#FFFFFF" filter="url(#shadow)"/>
+<path d="M808,654 V634 A14,14 0 0 1 822,620 H1114 A14,14 0 0 1 1128,634 V654 Z" fill="url(#g_s6)"/>
+<text x="824" y="641.5" font-size="13" font-weight="700" fill="#FFFFFF" text-anchor="start" letter-spacing="1.2">STEP 6</text>
+<text x="1090" y="641.5" font-size="12" font-weight="600" fill="#FFFFFF" text-anchor="end" fill-opacity="0.92">Review Agent</text>
+<circle cx="1108" cy="637.0" r="10" fill="#FFFFFF" stroke="#7C3AED" stroke-width="2"/>
+<text x="1108" y="641.0" font-size="11" font-weight="800" fill="#7C3AED" text-anchor="middle" >G</text>
+<text x="824" y="684" font-size="17" font-weight="700" fill="#0F172A" text-anchor="start" >Code Review</text>
+<text x="824" y="708" font-size="13" font-weight="400" fill="#475569" text-anchor="start" >Checks quality, security and coding</text>
+<text x="824" y="726" font-size="13" font-weight="400" fill="#475569" text-anchor="start" >standards; summarises risk for reviewer</text>
+<rect x="824" y="746" width="288" height="36" rx="18" fill="#FEF3C7" stroke="#F59E0B" stroke-width="1.5"/>
+<polygon points="846,756 854,764 846,772 838,764" fill="#F59E0B"/>
+<text x="864" y="769" font-size="12.5" font-weight="700" fill="#92400E" text-anchor="start" >Human review gate</text>
+<rect x="439" y="620" width="320" height="180" rx="14" fill="#FFFFFF" filter="url(#shadow)"/>
+<path d="M439,654 V634 A14,14 0 0 1 453,620 H745 A14,14 0 0 1 759,634 V654 Z" fill="url(#g_s7)"/>
+<text x="455" y="641.5" font-size="13" font-weight="700" fill="#FFFFFF" text-anchor="start" letter-spacing="1.2">STEP 7</text>
+<text x="721" y="641.5" font-size="12" font-weight="600" fill="#FFFFFF" text-anchor="end" fill-opacity="0.92">Repo Validation</text>
+<circle cx="739" cy="637.0" r="10" fill="#FFFFFF" stroke="#7C3AED" stroke-width="2"/>
+<text x="739" y="641.0" font-size="11" font-weight="800" fill="#7C3AED" text-anchor="middle" >G</text>
+<text x="455" y="684" font-size="17" font-weight="700" fill="#0F172A" text-anchor="start" >Central Repo Validation</text>
+<text x="455" y="708" font-size="13" font-weight="400" fill="#475569" text-anchor="start" >Branch protection and required checks</text>
+<text x="455" y="726" font-size="13" font-weight="400" fill="#475569" text-anchor="start" >on the central repository before merge</text>
+<rect x="455" y="746" width="288" height="36" rx="18" fill="#FAE8FF" stroke="#E879F9" stroke-width="1.5"/>
+<text x="599.0" y="769" font-size="12.5" font-weight="700" fill="#86198F" text-anchor="middle" >Required checks must be green</text>
+<rect x="70" y="620" width="320" height="180" rx="14" fill="#FFFFFF" filter="url(#shadow)"/>
+<path d="M70,654 V634 A14,14 0 0 1 84,620 H376 A14,14 0 0 1 390,634 V654 Z" fill="url(#g_s8)"/>
+<text x="86" y="641.5" font-size="13" font-weight="700" fill="#FFFFFF" text-anchor="start" letter-spacing="1.2">STEP 8</text>
+<text x="352" y="641.5" font-size="12" font-weight="600" fill="#FFFFFF" text-anchor="end" fill-opacity="0.92">Closure Agent</text>
+<circle cx="370" cy="637.0" r="10" fill="#FFFFFF" stroke="#7C3AED" stroke-width="2"/>
+<text x="370" y="641.0" font-size="11" font-weight="800" fill="#7C3AED" text-anchor="middle" >G</text>
+<text x="86" y="684" font-size="17" font-weight="700" fill="#0F172A" text-anchor="start" >DoD &amp; Work Closure</text>
+<text x="86" y="708" font-size="13" font-weight="400" fill="#475569" text-anchor="start" >Definition-of-Done checklist, traceability</text>
+<text x="86" y="726" font-size="13" font-weight="400" fill="#475569" text-anchor="start" >to the ticket; ticket updated and closed</text>
+<rect x="86" y="746" width="288" height="36" rx="18" fill="#E0E7FF" stroke="#818CF8" stroke-width="1.5"/>
+<text x="230.0" y="769" font-size="12.5" font-weight="700" fill="#3730A3" text-anchor="middle" >Requirement ↔ PR ↔ ticket linked</text>
+<path d="M170,150 H206" fill="none" stroke="#334155" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m_dark)"/>
+<path d="M560,150 H596" fill="none" stroke="#334155" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m_dark)"/>
+<path d="M1000,150 H1036" fill="none" stroke="#334155" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m_dark)"/>
+<path d="M1270,200 V224 H22 V390 H66" fill="none" stroke="#334155" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m_dark)"/>
+<text x="650" y="216" font-size="12.5" font-weight="700" fill="#334155" text-anchor="middle" stroke="#F8FAFC" stroke-width="5" paint-order="stroke" stroke-linejoin="round">decomposes goal → assigns stage agents</text>
+<path d="M390,390 H435" fill="none" stroke="#334155" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m_dark)"/>
+<path d="M759,390 H804" fill="none" stroke="#334155" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m_dark)"/>
+<path d="M1128,390 H1173" fill="none" stroke="#334155" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m_dark)"/>
+<path d="M1337,480 V616" fill="none" stroke="#16A34A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m_green)"/>
+<text x="1349" y="540" font-size="12" font-weight="700" fill="#16A34A" text-anchor="start" stroke="#F8FAFC" stroke-width="5" paint-order="stroke" stroke-linejoin="round">tests ready → CI</text>
+<path d="M1177,710 H1132" fill="none" stroke="#16A34A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m_green)"/>
+<text x="1152.5" y="700" font-size="11.5" font-weight="700" fill="#16A34A" text-anchor="middle" stroke="#FFF7ED" stroke-width="5" paint-order="stroke" stroke-linejoin="round">pass</text>
+<path d="M808,710 H763" fill="none" stroke="#334155" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m_dark)"/>
+<path d="M439,710 H394" fill="none" stroke="#334155" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m_dark)"/>
+<path d="M230,800 V856" fill="none" stroke="#334155" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m_dark)"/>
+<path d="M1230,620 V530 H1080 V485" fill="none" stroke="#DC2626" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="7 5" marker-end="url(#m_red)"/>
+<text x="1155" y="523" font-size="12" font-weight="700" fill="#DC2626" text-anchor="middle" stroke="#F8FAFC" stroke-width="5" paint-order="stroke" stroke-linejoin="round">✕ CI fails</text>
+<path d="M968,620 V485" fill="none" stroke="#DC2626" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="7 5" marker-end="url(#m_red)"/>
+<text x="978" y="604" font-size="12" font-weight="700" fill="#DC2626" text-anchor="start" stroke="#FFF7ED" stroke-width="5" paint-order="stroke" stroke-linejoin="round">✕ review rejects</text>
+<path d="M690,620 V546 H860 V485" fill="none" stroke="#DC2626" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="7 5" marker-end="url(#m_red)"/>
+<text x="775" y="539" font-size="12" font-weight="700" fill="#DC2626" text-anchor="middle" stroke="#F8FAFC" stroke-width="5" paint-order="stroke" stroke-linejoin="round">✕ checks fail</text>
+<path d="M330,481 C330,505 130,505 130,485" fill="none" stroke="#DC2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="6 4" marker-end="url(#m_red)"/>
+<text x="340" y="503" font-size="11.5" font-weight="700" fill="#DC2626" text-anchor="start" stroke="#F0F9FF" stroke-width="5" paint-order="stroke" stroke-linejoin="round">✕ revise scope</text>
+<path d="M699,481 C699,505 499,505 499,485" fill="none" stroke="#DC2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="6 4" marker-end="url(#m_red)"/>
+<text x="709" y="503" font-size="11.5" font-weight="700" fill="#DC2626" text-anchor="start" stroke="#F0F9FF" stroke-width="5" paint-order="stroke" stroke-linejoin="round">✕ redesign</text>
+<rect x="1560" y="100" width="320" height="730" rx="18" fill="#F5F3FF" stroke="#C4B5FD" stroke-width="1.5" filter="url(#shadow)"/>
+<path d="M1560,190 V118 A18,18 0 0 1 1578,100 H1862 A18,18 0 0 1 1880,118 V190 Z" fill="url(#g_gov)"/>
+<text x="1580" y="140" font-size="18" font-weight="800" fill="#FFFFFF" text-anchor="start" letter-spacing="1">GOVERNANCE LAYER</text>
+<text x="1580" y="166" font-size="13" font-weight="500" fill="#FFFFFF" text-anchor="start" fill-opacity="0.9">always on · beside every stage</text>
+<path d="M1840,121 L1859,129 V145 C1859,158 1850,166 1840,171 C1830,166 1821,158 1821,145 V129 Z" fill="#FFFFFF" fill-opacity="0.95"/>
+<polyline points="1832,146 1838,153 1849,138" fill="none" stroke="#7C3AED" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="1580" y="210" width="280" height="90" rx="12" fill="#FFFFFF" stroke="#DDD6FE" stroke-width="1.5"/>
+<circle cx="1604" cy="240" r="13" fill="#7C3AED"/>
+<text x="1604" y="245" font-size="13" font-weight="800" fill="#FFFFFF" text-anchor="middle" >1</text>
+<text x="1626" y="245" font-size="15" font-weight="700" fill="#4C1D95" text-anchor="start" >Path rules</text>
+<text x="1596" y="270" font-size="12.5" font-weight="400" fill="#6B7280" text-anchor="start" >Agent may only edit allowed</text>
+<text x="1596" y="288" font-size="12.5" font-weight="400" fill="#6B7280" text-anchor="start" >folders; protected files are locked</text>
+<rect x="1580" y="312" width="280" height="90" rx="12" fill="#FFFFFF" stroke="#DDD6FE" stroke-width="1.5"/>
+<circle cx="1604" cy="342" r="13" fill="#7C3AED"/>
+<text x="1604" y="347" font-size="13" font-weight="800" fill="#FFFFFF" text-anchor="middle" >2</text>
+<text x="1626" y="347" font-size="15" font-weight="700" fill="#4C1D95" text-anchor="start" >Secrets</text>
+<text x="1596" y="372" font-size="12.5" font-weight="400" fill="#6B7280" text-anchor="start" >Secret scanning on every diff;</text>
+<text x="1596" y="390" font-size="12.5" font-weight="400" fill="#6B7280" text-anchor="start" >no credentials leave the sandbox</text>
+<rect x="1580" y="414" width="280" height="90" rx="12" fill="#FFFFFF" stroke="#DDD6FE" stroke-width="1.5"/>
+<circle cx="1604" cy="444" r="13" fill="#7C3AED"/>
+<text x="1604" y="449" font-size="13" font-weight="800" fill="#FFFFFF" text-anchor="middle" >3</text>
+<text x="1626" y="449" font-size="15" font-weight="700" fill="#4C1D95" text-anchor="start" >Permissions</text>
+<text x="1596" y="474" font-size="12.5" font-weight="400" fill="#6B7280" text-anchor="start" >Least-privilege tokens; agents</text>
+<text x="1596" y="492" font-size="12.5" font-weight="400" fill="#6B7280" text-anchor="start" >cannot merge or push to main</text>
+<rect x="1580" y="516" width="280" height="90" rx="12" fill="#FFFFFF" stroke="#DDD6FE" stroke-width="1.5"/>
+<circle cx="1604" cy="546" r="13" fill="#7C3AED"/>
+<text x="1604" y="551" font-size="13" font-weight="800" fill="#FFFFFF" text-anchor="middle" >4</text>
+<text x="1626" y="551" font-size="15" font-weight="700" fill="#4C1D95" text-anchor="start" >Audit log</text>
+<text x="1596" y="576" font-size="12.5" font-weight="400" fill="#6B7280" text-anchor="start" >Every thought, tool call and</text>
+<text x="1596" y="594" font-size="12.5" font-weight="400" fill="#6B7280" text-anchor="start" >approval is recorded for review</text>
+<rect x="1580" y="618" width="280" height="90" rx="12" fill="#FFFFFF" stroke="#DDD6FE" stroke-width="1.5"/>
+<circle cx="1604" cy="648" r="13" fill="#7C3AED"/>
+<text x="1604" y="653" font-size="13" font-weight="800" fill="#FFFFFF" text-anchor="middle" >5</text>
+<text x="1626" y="653" font-size="15" font-weight="700" fill="#4C1D95" text-anchor="start" >Max steps &amp; budget</text>
+<text x="1596" y="678" font-size="12.5" font-weight="400" fill="#6B7280" text-anchor="start" >Caps on iterations, tokens and</text>
+<text x="1596" y="696" font-size="12.5" font-weight="400" fill="#6B7280" text-anchor="start" >run time; stop and escalate</text>
+<rect x="1580" y="726" width="280" height="84" rx="12" fill="#EDE9FE" stroke="#A78BFA" stroke-width="1.5" stroke-dasharray="5 4"/>
+<text x="1596" y="752" font-size="13" font-weight="800" fill="#7C3AED" text-anchor="start" >On violation:</text>
+<text x="1596" y="774" font-size="12.5" font-weight="500" fill="#5B21B6" text-anchor="start" >action blocked, logged to the</text>
+<text x="1596" y="794" font-size="12.5" font-weight="500" fill="#5B21B6" text-anchor="start" >audit trail and escalated to a human</text>
+<rect x="60" y="860" width="500" height="130" rx="18" fill="url(#g_end)" filter="url(#shadow)"/>
+<text x="118" y="934" font-size="26" font-weight="800" fill="#FFFFFF" text-anchor="middle" letter-spacing="2">END</text>
+<rect x="180" y="878" width="360" height="40" rx="20" fill="#16A34A"/>
+<text x="360" y="904" font-size="14" font-weight="700" fill="#FFFFFF" text-anchor="middle" >✓ Merged increment</text>
+<rect x="180" y="932" width="360" height="40" rx="20" fill="#DC2626"/>
+<text x="360" y="958" font-size="14" font-weight="700" fill="#FFFFFF" text-anchor="middle" >✕ Recorded reject, with reasons</text>
+<path d="M640,874 V976 A430,14 0 0 0 1500,976 V874 Z" fill="url(#g_metrics)" stroke="#14B8A6" stroke-width="1.5" filter="url(#shadow)"/>
+<ellipse cx="1070" cy="874" rx="430" ry="14" fill="#F0FDFA" stroke="#14B8A6" stroke-width="1.5"/>
+<text x="670" y="914" font-size="15" font-weight="800" fill="#0F766E" text-anchor="start" letter-spacing="1">METRICS STORE</text>
+<text x="820" y="914" font-size="12.5" font-weight="500" fill="#0F766E" text-anchor="start" font-style="italic">feeds the net-productivity comparison</text>
+<rect x="668" y="928" width="157.6" height="32" rx="16" fill="#FFFFFF" stroke="#5EEAD4" stroke-width="1.5"/>
+<text x="746.8" y="949" font-size="12.5" font-weight="700" fill="#115E59" text-anchor="middle" >Time to PR &amp; merge</text>
+<rect x="837.6" y="928" width="78.4" height="32" rx="16" fill="#FFFFFF" stroke="#5EEAD4" stroke-width="1.5"/>
+<text x="876.8000000000001" y="949" font-size="12.5" font-weight="700" fill="#115E59" text-anchor="middle" >Retries</text>
+<rect x="928.0" y="928" width="136.0" height="32" rx="16" fill="#FFFFFF" stroke="#5EEAD4" stroke-width="1.5"/>
+<text x="996.0" y="949" font-size="12.5" font-weight="700" fill="#115E59" text-anchor="middle" >Review comments</text>
+<rect x="1076.0" y="928" width="121.60000000000001" height="32" rx="16" fill="#FFFFFF" stroke="#5EEAD4" stroke-width="1.5"/>
+<text x="1136.8" y="949" font-size="12.5" font-weight="700" fill="#115E59" text-anchor="middle" >Policy blocks</text>
+<rect x="1209.6" y="928" width="114.4" height="32" rx="16" fill="#FFFFFF" stroke="#5EEAD4" stroke-width="1.5"/>
+<text x="1266.8" y="949" font-size="12.5" font-weight="700" fill="#115E59" text-anchor="middle" >Merge result</text>
+<path d="M1070,832 V856" fill="none" stroke="#94A3B8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="5 5" marker-end="url(#m_grey)"/>
+<text x="1082" y="850" font-size="12" font-weight="500" fill="#64748B" text-anchor="start" font-style="italic">every stage logs telemetry</text>
+<path d="M562,925 H636" fill="none" stroke="#94A3B8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="5 5" marker-end="url(#m_grey)"/>
+<text x="600" y="915" font-size="11" font-weight="600" fill="#64748B" text-anchor="middle" >logged</text>
+<rect x="1560" y="860" width="320" height="130" rx="16" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="1580" y="884" font-size="12" font-weight="800" fill="#64748B" text-anchor="start" letter-spacing="1.5">LEGEND</text>
+<path d="M1580,906 H1606" fill="none" stroke="#334155" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m_dark)"/>
+<text x="1616" y="910" font-size="11.5" font-weight="500" fill="#334155" text-anchor="start" >Main flow</text>
+<path d="M1740,906 H1766" fill="none" stroke="#16A34A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#m_green)"/>
+<text x="1776" y="910" font-size="11.5" font-weight="500" fill="#334155" text-anchor="start" >Pass / hand-off</text>
+<path d="M1580,936 H1606" fill="none" stroke="#DC2626" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="6 4" marker-end="url(#m_red)"/>
+<text x="1616" y="940" font-size="11.5" font-weight="500" fill="#334155" text-anchor="start" >Return on failure</text>
+<polygon points="1753,928 1761,936 1753,944 1745,936" fill="#F59E0B"/>
+<text x="1776" y="940" font-size="11.5" font-weight="500" fill="#334155" text-anchor="start" >Human gate</text>
+<circle cx="1593" cy="966" r="10" fill="#FFFFFF" stroke="#7C3AED" stroke-width="2"/>
+<text x="1593" y="970" font-size="11" font-weight="800" fill="#7C3AED" text-anchor="middle" >G</text>
+<text x="1616" y="970" font-size="11.5" font-weight="500" fill="#334155" text-anchor="start" >Governance check</text>
+<path d="M1740,966 H1766" fill="none" stroke="#94A3B8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="5 5" marker-end="url(#m_grey)"/>
+<text x="1776" y="970" font-size="11.5" font-weight="500" fill="#334155" text-anchor="start" >Telemetry</text>
+<text x="40" y="1018" font-size="12" font-weight="400" fill="#64748B" text-anchor="start" font-style="italic">Phase 1 reads left → right. Phase 2 continues right → left, so every CI, check or review failure loops back to the Code Agent (Step 3) by the shortest path.</text>
+</svg>

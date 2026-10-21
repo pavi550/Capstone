@@ -1,0 +1,9 @@
+pyyaml>=6
+
+[chroma]
+chromadb>=0.5
+
+[dev]
+pytest
+ruff
+bandit

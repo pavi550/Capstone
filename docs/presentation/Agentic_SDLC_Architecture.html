@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agentic SDLC – Architecture, told as the story of one ticket</title>
+<style>
+  :root {
+    --navy: #1F4E79; --teal: #127A6A; --purple: #5B3A99; --violet: #7A4FC0; --gold: #B7860B;
+    --orange: #C55A11; --green: #38761D; --red: #B42318; --ink: #1F2937; --muted: #5B6573; --line: #DDE3EA;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; font-family: "Segoe UI", Arial, sans-serif; background: #F4F6FA; color: var(--ink); line-height: 1.6; }
+
+  /* ---------- hero ---------- */
+  .hero { background: linear-gradient(135deg, #16385A, #1F4E79 60%, #2B6296); color: #fff; padding: 56px 24px 48px; }
+  .hero-inner { max-width: 1180px; margin: 0 auto; display: grid; grid-template-columns: 1.3fr 1fr; gap: 40px; align-items: center; }
+  .hero h1 { margin: 0 0 12px; font-size: 38px; line-height: 1.2; }
+  .hero p { margin: 0 0 12px; color: #D6E4F5; font-size: 17px; }
+  .hero .start { display: inline-block; margin-top: 10px; background: #FFE08A; color: #16385A; font-weight: 700;
+                 padding: 10px 18px; border-radius: 8px; text-decoration: none; }
+  .ticket { background: #fff; color: var(--ink); border-radius: 12px; padding: 18px 20px; box-shadow: 0 10px 30px rgba(0,0,0,.25); font-size: 14px; }
+  .ticket .tk-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .ticket .tk-id { font-weight: 700; color: var(--navy); }
+  .ticket .tk-status { font-size: 12px; background: #DCE8F7; color: var(--navy); padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+  .ticket h3 { margin: 0 0 8px; font-size: 18px; }
+  .ticket ul { margin: 6px 0 0; padding-left: 18px; }
+  .ticket .tk-foot { margin-top: 10px; font-size: 12px; color: var(--muted); }
+
+  /* ---------- layout ---------- */
+  .wrap { max-width: 1240px; margin: 0 auto; padding: 0 20px; display: grid; grid-template-columns: minmax(0, 1fr) 500px; gap: 32px; }
+  .story { padding: 30px 0 80px; }
+  .stage { position: sticky; top: 14px; align-self: start; padding-top: 30px; }
+
+  /* ---------- scenes ---------- */
+  .scene { min-height: 88vh; padding: 26px 0; display: flex; flex-direction: column; justify-content: center; }
+  .scene .card { background: #fff; border-radius: 14px; padding: 24px 26px; box-shadow: 0 2px 10px rgba(0,0,0,.06);
+                 border-top: 5px solid var(--c, var(--navy)); opacity: .45; transition: opacity .35s; }
+  .scene.active .card { opacity: 1; }
+  .kicker { font-size: 12px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase; color: var(--c, var(--navy)); }
+  .scene h2 { margin: 4px 0 12px; font-size: 26px; line-height: 1.25; }
+  .scene p { margin: 0 0 12px; font-size: 16px; }
+  .scene .lead { font-size: 17px; }
+  .box { border-radius: 10px; padding: 12px 14px; margin-top: 14px; font-size: 14px; }
+  .box h4 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .6px; }
+  .box ul { margin: 0; padding-left: 18px; }
+  .box p { font-size: 14px; margin: 0 0 6px; }
+  .produces { background: #F2F7EE; border: 1px solid #CFE3C3; } .produces h4 { color: var(--green); }
+  .gate { background: #FFF4EC; border: 1px solid #F3C9A9; } .gate h4 { color: var(--orange); }
+  .wrong { background: #FDF0EF; border: 1px solid #F2C3BE; } .wrong h4 { color: var(--red); }
+  .peek { background: #0F1B2A; color: #D7E3F4; font-family: Consolas, "Courier New", monospace; font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
+  .peek h4 { color: #8FB6E8; font-family: "Segoe UI", Arial, sans-serif; }
+  .peek .ok { color: #8FD694; } .peek .bad { color: #FF9C94; } .peek .dim { color: #7D8DA3; }
+  .chip { display: inline-block; font-family: Consolas, monospace; font-size: 12.5px; background: #fff; border: 1px solid #CFE3C3;
+          border-radius: 6px; padding: 1px 7px; margin: 2px 4px 2px 0; }
+  .parts { margin-top: 12px; font-size: 13px; color: var(--muted); }
+  .parts b { color: var(--ink); }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .math { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; }
+
+  /* ---------- architecture diagram ---------- */
+  .diagram { background: #fff; border-radius: 14px; padding: 14px; box-shadow: 0 2px 10px rgba(0,0,0,.08); }
+  .dg-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; gap: 8px; }
+  .dg-top b { font-size: 14px; color: var(--navy); }
+  .status { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 12px; background: #DCE8F7; color: var(--navy); white-space: nowrap; }
+  .layer { border: 1.5px solid var(--line); border-radius: 10px; padding: 6px 8px 8px; margin-bottom: 6px; transition: border-color .3s, background .3s; }
+  .layer > .lt { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin-bottom: 5px; }
+  .row { display: flex; gap: 5px; align-items: stretch; }
+  .row .n { flex: 1; }
+  .arr { align-self: center; color: #A7B1BD; font-size: 12px; }
+  .n { border: 1.5px solid #CBD3DD; background: #F7F9FB; border-radius: 7px; padding: 5px 6px; font-size: 11.5px; line-height: 1.25;
+       text-align: center; color: #6B7684; transition: all .3s; min-width: 0; }
+  .n small { display: block; font-size: 10px; opacity: .85; }
+  .n.human { border-style: dashed; }
+  .n.on { color: #fff; border-color: transparent; transform: translateY(-1px); box-shadow: 0 3px 10px rgba(0,0,0,.18); }
+  .n.on.c-navy { background: var(--navy); } .n.on.c-teal { background: var(--teal); } .n.on.c-purple { background: var(--purple); }
+  .n.on.c-violet { background: var(--violet); } .n.on.c-orange { background: var(--orange); } .n.on.c-green { background: var(--green); }
+  .n.on.c-gold { background: var(--gold); } .n.on.c-red { background: var(--red); }
+  .layer.lit { border-color: #9DB3CC; background: #FBFCFE; }
+  .dg-cap { margin-top: 10px; font-size: 13px; color: var(--ink); background: #F4F6FA; border-radius: 8px; padding: 8px 10px; min-height: 58px; }
+  .dg-cap b { color: var(--navy); }
+  .dots { display: flex; gap: 5px; justify-content: center; margin-top: 10px; flex-wrap: wrap; }
+  .dots a { width: 22px; height: 22px; border-radius: 50%; background: #E3E8EF; color: var(--muted); font-size: 11px; font-weight: 700;
+            display: flex; align-items: center; justify-content: center; text-decoration: none; }
+  .dots a.on { background: var(--navy); color: #fff; }
+  .legend { display: flex; gap: 12px; justify-content: center; font-size: 11px; color: var(--muted); margin-top: 8px; }
+  .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; border: 1.5px solid #9AA5B1; }
+  .legend .lh::before { border-style: dashed; }
+
+  /* ---------- ending ---------- */
+  .ending { max-width: 1240px; margin: 0 auto; padding: 10px 20px 60px; }
+  .ending h2 { font-size: 26px; margin: 0 0 6px; color: var(--navy); }
+  .ending > p { margin: 0 0 18px; color: var(--muted); }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .panel { background: #fff; border-radius: 14px; padding: 18px 20px; box-shadow: 0 2px 10px rgba(0,0,0,.06); }
+  .panel h3 { margin: 0 0 8px; font-size: 17px; }
+  .panel ul { margin: 0; padding-left: 18px; font-size: 14px; }
+  .panel table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .panel td { padding: 5px 4px; border-bottom: 1px solid #EEF1F5; vertical-align: top; }
+  .panel td:first-child { font-family: Consolas, monospace; font-size: 12.5px; white-space: nowrap; color: var(--navy); }
+  .wide { grid-column: span 3; }
+  .moral { margin-top: 20px; background: var(--navy); color: #fff; border-radius: 14px; padding: 22px 26px; font-size: 18px; text-align: center; }
+  .moral b { color: #FFE08A; }
+  footer { text-align: center; font-size: 13px; color: var(--muted); padding: 0 20px 40px; }
+  footer a { color: var(--navy); }
+
+  @media (max-width: 1050px) {
+    .hero-inner { grid-template-columns: 1fr; }
+    .wrap { grid-template-columns: 1fr; }
+    .stage { position: static; order: -1; }
+    .scene { min-height: auto; }
+    .scene .card { opacity: 1; }
+    .grid3 { grid-template-columns: 1fr; } .wide { grid-column: auto; }
+    .two { grid-template-columns: 1fr; }
+  }
+  @media print {
+    .stage, .hero .start { display: none; }
+    .wrap { grid-template-columns: 1fr; }
+    .scene { min-height: auto; } .scene .card { opacity: 1; box-shadow: none; border: 1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+
+<!-- =============================== HERO =============================== -->
+<section class="hero">
+  <div class="hero-inner">
+    <div>
+      <h1>How an AI team turns one Jira ticket into live code</h1>
+      <p>This page explains the Agentic SDLC architecture by following a single real ticket from the moment it is
+         written to the moment it is deployed. Each chapter shows who acts, what they produce, where a human
+         steps in, and what happens when something goes wrong.</p>
+      <p>As you scroll, the architecture diagram on the right lights up the parts of the system that are working
+         in that chapter.</p>
+      <a class="start" href="#s1">Start the story ↓</a>
+    </div>
+    <div class="ticket">
+      <div class="tk-head"><span class="tk-id">NETOPS-101</span><span class="tk-status">To Do</span></div>
+      <h3>Link utilisation threshold alarms</h3>
+      <div><b>REQ-001 Utilisation alarm</b>: raise a MAJOR alarm when link utilisation
+        (traffic_bps ÷ capacity_bps × 100, 1 decimal) is 85.0% or more.</div>
+      <ul>
+        <li>85.0% raises MAJOR</li>
+        <li>84.9% raises no alarm</li>
+        <li>90.0% raises MAJOR</li>
+      </ul>
+      <div style="margin-top:8px"><b>REQ-002 Alarm clear (hysteresis)</b>: an active alarm clears only when utilisation
+        drops below 80.0%, so the alarm does not flap.</div>
+      <div class="tk-foot">Linked: Confluence page "Link utilisation alarming – functional spec" · Repo: telemetry-service</div>
+    </div>
+  </div>
+</section>
+
+<div class="wrap">
+  <!-- =============================== STORY =============================== -->
+  <main class="story">
+
+    <section class="scene" id="s1" style="--c: var(--navy)"
+             data-on="jira docs std repo" data-human="hdocs" data-status="To Do"
+             data-cap="<b>Intake.</b> The ticket, its Confluence page, the coding standards and the target repository are the four inputs to every run.">
+      <div class="card">
+        <div class="kicker">Chapter 1 · The request</div>
+        <h2>A product owner writes a ticket</h2>
+        <p class="lead">Our story starts with <b>NETOPS-101</b>. The network operations team wants the telemetry service to raise an
+           alarm when a network link runs hot, and to clear it only when traffic has clearly dropped, so the alarm does not
+           flap. The details live in a Confluence functional spec.</p>
+        <p>The system gathers everything the ticket depends on: the Jira item, the linked documents (Markdown, Confluence
+           HTML export, Word or JSON), the team's coding standards, and the path to the repository that must change.</p>
+        <div class="box gate">
+          <h4>Human gate 1</h4>
+          <p>A person confirms: "Yes, these are the right requirement documents." Nothing runs without this.</p>
+        </div>
+        <div class="box wrong">
+          <h4>If it goes wrong</h4>
+          <p>No documents found: the system asks for a path. Still nothing, or the human rejects them: the run stops as <b>blocked</b>.</p>
+        </div>
+        <div class="parts"><b>Parts involved:</b> Jira, Confluence documents, coding standards, Git repository, human reviewer</div>
+      </div>
+    </section>
+
+    <section class="scene" id="s2" style="--c: var(--teal)"
+             data-on="docs rag vdb kb llm" data-human="hkb" data-status="In analysis"
+             data-cap="<b>Context layer.</b> Documents are split, embedded and stored so every agent later gets only the context relevant to NETOPS-101.">
+      <div class="card">
+        <div class="kicker">Chapter 2 · The memory</div>
+        <h2>The system reads everything and builds a knowledge base</h2>
+        <p class="lead">An AI writes good code only when it understands the request <i>and</i> the existing code. So before anyone
+           codes, the <b>Knowledge Base Agent</b> reads the documents and pulls out each requirement with its acceptance criteria.</p>
+        <p>In parallel, the RAG pipeline cuts the documents and source code into small chunks, turns each chunk into a vector
+           (embedding) and stores it in <b>ChromaDB</b>. Later, when the Coding Agent asks "how is link utilisation calculated?",
+           it gets back only the few chunks that answer that question, such as <span class="chip">telemetry/collector.py</span>.</p>
+        <div class="box peek"><h4>Behind the scenes: RequirementKnowledgeBase.skills.md</h4>REQ-001  Utilisation alarm           3 acceptance criteria
+REQ-002  Alarm clear (hysteresis)    2 acceptance criteria
+<span class="dim">status: pending · source: link_utilisation_alarms.md</span></div>
+        <div class="box gate">
+          <h4>Human gate 2</h4>
+          <p>A person approves the extracted requirements. This is the cheapest moment to catch a misunderstanding.</p>
+        </div>
+        <div class="box produces">
+          <h4>Produces</h4>
+          <span class="chip">RequirementKnowledgeBase.skills.md</span><span class="chip">knowledge_base.json</span><span class="chip">vectors in ChromaDB</span>
+        </div>
+        <div class="parts"><b>Parts involved:</b> Knowledge Base Agent, chunking and embedding, ChromaDB, LLM</div>
+      </div>
+    </section>
+
+    <section class="scene" id="s3" style="--c: var(--purple)"
+             data-on="orch plan kb repo" data-status="Planned"
+             data-cap="<b>Orchestrator.</b> The LangGraph orchestrator owns the state of the run and decides which agent acts next.">
+      <div class="card">
+        <div class="kicker">Chapter 3 · The manager</div>
+        <h2>The Orchestrator breaks the work into tasks</h2>
+        <p class="lead">The <b>Orchestrator Agent</b> is the project manager of the AI team. It is built as a LangGraph state
+           graph: every step is a node, and the graph remembers where NETOPS-101 is at all times.</p>
+        <p>Its <b>Task Planner</b> turns each requirement into concrete tasks and records them. The Orchestrator then
+           checks the most basic thing: is there a repository to work in? The Coding Agent is only called when there is.</p>
+        <div class="box peek"><h4>Behind the scenes: TaskPlanner.md</h4>T-REQ-001-1  Add utilisation_pct(traffic_bps, capacity_bps) to the alarms module
+T-REQ-001-2  Raise a MAJOR alarm at 85.0% or more
+T-REQ-002-1  Clear an active alarm only below 80.0% (hysteresis)
+<span class="dim">each task is linked to its requirement and acceptance criteria</span></div>
+        <div class="box wrong">
+          <h4>If it goes wrong</h4>
+          <p>No repository, or it cannot be read: the system writes <span class="chip">CONCERN.md</span> explaining why and stops
+             with status <b>blocked</b> (exit code 2) instead of guessing.</p>
+        </div>
+        <div class="parts"><b>Parts involved:</b> Orchestrator Agent (LangGraph), Task Planner, repository check</div>
+      </div>
+    </section>
+
+    <section class="scene" id="s4" style="--c: var(--orange)"
+             data-on="guard repo mcp orch" data-human="hmcp" data-status="Ready for dev"
+             data-cap="<b>Guardrails.</b> Rules that every later step must pass: allowed paths, protected branches, approved tools, baseline tests.">
+      <div class="card">
+        <div class="kicker">Chapter 4 · The rules</div>
+        <h2>Guardrails are set before any code is touched</h2>
+        <p class="lead">Before letting AI agents write into a real codebase, the Orchestrator puts up fences.</p>
+        <ul>
+          <li><b>Own branch:</b> work happens on <span class="chip">agentic/&lt;run-id&gt;</span>. The branches main, master,
+              develop and release/* are protected and never committed to.</li>
+          <li><b>Allowed paths only:</b> .git, .env, keys and secret files can never be written.</li>
+          <li><b>Approved tools only:</b> MCP integrations such as Gerrit must be on the approved list and confirmed by a human.</li>
+          <li><b>Baseline:</b> the existing tests run once, so later failures can be blamed correctly.</li>
+        </ul>
+        <div class="box gate">
+          <h4>Human gate 3</h4>
+          <p>"Allow the orchestrator to use Gerrit?" If the answer is no, the run stops.</p>
+        </div>
+        <div class="parts"><b>Parts involved:</b> Guardrails, Git repository, MCP tool approval, audit log</div>
+      </div>
+    </section>
+
+    <section class="scene" id="s5" style="--c: var(--violet)"
+             data-on="code test llm vdb guard" data-status="In progress"
+             data-cap="<b>Builders.</b> Coding Agent and Test Agent run at the same time from the same requirement, so tests are not written to fit the code.">
+      <div class="card">
+        <div class="kicker">Chapter 5 · The builders</div>
+        <h2>Two agents work side by side: one codes, one tests</h2>
+        <p class="lead">For REQ-001, the <b>Coding Agent</b> and the <b>Test Agent</b> start at the same time.</p>
+        <div class="two">
+          <div>
+            <p><b>Coding Agent</b> retrieves context from the knowledge base, follows the coding standards and asks the LLM to write
+               the code. Its SWE bots find the right files, edit them, build, and fix their own errors.</p>
+          </div>
+          <div>
+            <p><b>Test Agent</b> turns each acceptance criterion into a test. Because it works from the requirement, not from the
+               code, its tests check what the business asked for.</p>
+          </div>
+        </div>
+        <div class="box peek"><h4>Behind the scenes: what each agent writes</h4><span class="dim"># telemetry/alarms.py  (Coding Agent)</span>
+def utilisation_alarm(util_pct):
+    return "MAJOR" if util_pct &gt;= 85.0 else None
+
+<span class="dim"># tests/test_alarms.py  (Test Agent)</span>
+assert utilisation_alarm(85.0) == "MAJOR"
+assert utilisation_alarm(84.9) is None
+assert utilisation_alarm(90.0) == "MAJOR"</div>
+        <div class="box gate" style="background:#F6F2FC;border-color:#D9CCF0">
+          <h4 style="color:var(--violet)">Checked on every write</h4>
+          <p>Each file path is validated against the guardrails, the content is scanned for secrets, and the Test Agent may only
+             write test files. A violation sends the work straight back to the agent.</p>
+        </div>
+        <div class="parts"><b>Parts involved:</b> Coding Agent + SWE bots, Test Agent, LLM, knowledge base, guardrails</div>
+      </div>
+    </section>
+
+    <section class="scene" id="s6" style="--c: var(--red)"
+             data-on="run triage code test kb" data-human="hreq" data-status="In progress · fixing"
+             data-cap="<b>Feedback loop.</b> A failed test is classified first, then only the faulty part (code, test or requirement) is redone.">
+      <div class="card">
+        <div class="kicker">Chapter 6 · The twist</div>
+        <h2>A test fails, and the system works out who is wrong</h2>
+        <p class="lead">The first run fails: one test expected <span class="chip">utilisation_alarm(85.0) == "MAJOR"</span>, but an early
+           draft of the code used <span class="chip">util_pct &gt; 85.0</span> instead of <span class="chip">&gt;=</span>.</p>
+        <p>Instead of blindly retrying, the <b>Triage Agent</b> reads the failure and decides what caused it:</p>
+        <ul>
+          <li><b>Code is wrong</b>: the Coding Agent gets the failure and fixes the code. (This is our case.)</li>
+          <li><b>Test is wrong</b>: only the Test Agent reruns.</li>
+          <li><b>Requirement is wrong</b>: a human is asked to correct it, the knowledge base is rewritten, and both agents rerun.</li>
+        </ul>
+        <p>Every pass also goes through the lint gate and a <b>quality score</b> out of 100: failing tests cost 40 points, lint
+           issues 10, and long functions, deep nesting or duplicated lines cost a few points each.</p>
+        <div class="box peek"><h4>Behind the scenes: run log</h4>==&gt; [REQ-001] tests <span class="bad">FAILED</span>; quality score 60/100 (tests failing)
+==&gt; [REQ-001] failure triage -&gt; <b>code</b>: threshold boundary 85.0% excluded
+==&gt; [REQ-001] tests <span class="ok">passed</span>; quality score 100/100</div>
+        <div class="box wrong">
+          <h4>Safety limit</h4>
+          <p>At most 3 fix attempts per requirement. After that the requirement is marked <b>failed</b> and nothing is integrated or deployed.</p>
+        </div>
+        <div class="parts"><b>Parts involved:</b> test runner, quality evaluator, Triage Agent, Coding / Test Agent, human (for requirement fixes)</div>
+      </div>
+    </section>
+
+    <section class="scene" id="s7" style="--c: var(--gold)"
+             data-on="ctx sec pat ens llm" data-status="In review"
+             data-cap="<b>Review Agent.</b> Context engine, then security and pattern reviewers in parallel, then an ensemble vote that filters noise.">
+      <div class="card">
+        <div class="kicker">Chapter 7 · The inspectors</div>
+        <h2>Two reviewers inspect the change, and a vote removes the noise</h2>
+        <p class="lead">Passing tests is not enough. The <b>Review Agent</b> checks the change the way a senior engineer would.</p>
+        <p><b>Step 1, context engine:</b> it takes the diff plus a full code index and collects the code that matters: the changed
+           functions, who calls them, what they import, and the related tests.</p>
+        <p><b>Step 2, two reviewers in parallel:</b> the <b>Security</b> reviewer looks for secrets, injection, unsafe
+           deserialization, weak crypto and similar holes. The <b>Pattern</b> reviewer looks for broad excepts, debug prints, TODOs,
+           deep nesting and very long functions. Each has a rule-based checker and an LLM checker.</p>
+        <p><b>Step 3, ensemble vote:</b> findings about the same issue are grouped. Each reviewer's vote is its weight times its
+           confidence, and the votes are combined. A finding is kept only if the combined score reaches 0.5.</p>
+        <div class="box peek"><h4>Behind the scenes: the vote for NETOPS-101</h4>Finding A  yaml.load() on the alarm-threshold config   (SEC-DESERIALIZE, high)
+  security_rules  1.0 x 0.75 = 0.75
+  security_llm    0.8 x 0.70 = 0.56
+  combined = 1 - (1-0.75)(1-0.56) = <span class="bad">0.89  KEPT, blocking</span>
+
+Finding B  print() left in alarms.py           (PAT-DEBUG-PRINT, low)
+  pattern_rules   0.9 x 0.40 = 0.36
+  combined = <span class="ok">0.36  DROPPED as noise</span></div>
+        <p style="margin-top:12px">Finding A is high severity, so the review fails and the code goes back for refinement
+           (switch to <span class="chip">yaml.safe_load</span>). On the second pass the review passes. A review also fails if the
+           quality score is below 60. At most 2 review rounds are allowed.</p>
+        <div class="box produces">
+          <h4>Produces</h4>
+          <span class="chip">review-REQ-001.json</span> with kept and dropped findings, noise reduction, and each reviewer's
+          precision, recall and F1 against the consensus.
+        </div>
+        <div class="parts"><b>Parts involved:</b> context engine, security reviewer, pattern reviewer, ensemble, LLM</div>
+      </div>
+    </section>
+
+    <section class="scene" id="s8" style="--c: var(--purple)"
+             data-on="orch code test run ctx" data-status="In progress · REQ-002"
+             data-cap="<b>Requirement loop.</b> The Orchestrator repeats build, test, triage and review for every requirement in the ticket.">
+      <div class="card">
+        <div class="kicker">Chapter 8 · The next requirement</div>
+        <h2>The same loop runs again for REQ-002</h2>
+        <p class="lead">REQ-001 is now <b>implemented</b>, and the knowledge base records it. The Orchestrator moves to
+           <b>REQ-002 Alarm clear (hysteresis)</b> and runs the same cycle: code and tests in parallel, run, triage if needed, review.</p>
+        <p>Integration only starts when <b>every</b> requirement of the ticket is implemented, tested and reviewed. If any one
+           fails, the run stops before touching Git, so half-finished work never reaches reviewers or production.</p>
+        <div class="box peek"><h4>Behind the scenes</h4>==&gt; [REQ-001] implemented in 2 iteration(s)
+==&gt; [REQ-002] start: Alarm clear (hysteresis)
+==&gt; [REQ-002] tests <span class="ok">passed</span>; review <span class="ok">passed</span>: 0 findings kept
+==&gt; [requirements] all 2 requirements implemented, tested and reviewed</div>
+        <div class="parts"><b>Parts involved:</b> Orchestrator, Coding Agent, Test Agent, test runner, Review Agent</div>
+      </div>
+    </section>
+
+    <section class="scene" id="s9" style="--c: var(--green)"
+             data-on="git gerrit ci mcp" data-human="hgerrit" data-status="Code review"
+             data-cap="<b>Integration.</b> One commit on the work branch, pushed to Gerrit for human review, then a full CI regression run.">
+      <div class="card">
+        <div class="kicker">Chapter 9 · The hand-off</div>
+        <h2>The change goes to Gerrit and CI</h2>
+        <p class="lead">The Orchestrator makes one commit on the work branch containing <b>only</b> the files the agents wrote plus
+           the documentation, never build output.</p>
+        <div class="box peek"><h4>Behind the scenes: commit message</h4>feat: implement REQ-001, REQ-002
+
+- REQ-001 Utilisation alarm: tests pass, review passed, quality 100
+- REQ-002 Alarm clear (hysteresis): tests pass, review passed, quality 100</div>
+        <div class="box gate">
+          <h4>Human gate 4</h4>
+          <p>"Push agentic/&lt;run-id&gt; to Gerrit for review?" Once approved, it is pushed to
+             <span class="chip">refs/for/main</span> where a human engineer reviews the patch set.</p>
+        </div>
+        <p style="margin-top:12px">Then the <b>CI/CD pipeline</b> builds everything and runs the full regression suite, to make sure the
+           new feature has not broken something else.</p>
+        <div class="box wrong">
+          <h4>If it goes wrong</h4>
+          <p>A regression failure is sent to the Coding Agent as a "fix CI regression" task. At most 2 CI attempts, then the run is marked failed.</p>
+        </div>
+        <div class="parts"><b>Parts involved:</b> Git, Gerrit (via approved MCP), CI/CD pipeline, human reviewer</div>
+      </div>
+    </section>
+
+    <section class="scene" id="s10" style="--c: var(--green)"
+             data-on="dod deploy close log" data-human="hdeploy" data-status="Done"
+             data-cap="<b>Delivery.</b> Documentation, staged deployment with an approval at each step, and the Jira ticket closed with a link to the commit.">
+      <div class="card">
+        <div class="kicker">Chapter 10 · The launch</div>
+        <h2>Documented, deployed, and closed</h2>
+        <p class="lead">With CI green, the system writes the Definition of Done checklist and a traceability matrix that links every
+           requirement to its code, tests and review.</p>
+        <div class="box peek"><h4>Behind the scenes: traceability.md</h4>REQ-001 -&gt; telemetry/alarms.py -&gt; tests/test_alarms.py -&gt; review passed
+REQ-002 -&gt; telemetry/alarms.py -&gt; tests/test_alarms.py -&gt; review passed</div>
+        <p style="margin-top:12px">Deployment is promoted one environment at a time: <b>Dev → QA → Staging → Production</b>.</p>
+        <div class="box gate">
+          <h4>Human gate 5</h4>
+          <p>Each environment needs its own approval. Saying no stops the promotion there; a failed deployment marks the run failed.</p>
+        </div>
+        <p style="margin-top:12px">Finally, <b>NETOPS-101 is closed</b> in Jira with a link to the commit. Network operators now get a MAJOR
+           alarm when a link reaches 85% utilisation, and it clears only below 80%, so the alarm no longer flaps.</p>
+        <div class="box produces">
+          <h4>Produces</h4>
+          <span class="chip">DoD.md</span><span class="chip">traceability.md</span><span class="chip">runs/&lt;id&gt;/report.md</span><span class="chip">runs/&lt;id&gt;/events.jsonl</span>
+        </div>
+        <div class="parts"><b>Parts involved:</b> documentation, deployment pipeline, Jira, audit log, human approver</div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- =============================== DIAGRAM =============================== -->
+  <aside class="stage">
+    <div class="diagram">
+      <div class="dg-top"><b>Architecture</b><span class="status" id="status">NETOPS-101 · To Do</span></div>
+
+      <div class="layer" data-layer>
+        <div class="lt">1 · Sources</div>
+        <div class="row">
+          <div class="n c-navy" data-id="jira">Jira<small>NETOPS-101</small></div>
+          <div class="n c-navy" data-id="docs">Confluence<small>requirements</small></div>
+          <div class="n c-navy" data-id="std">Coding<small>standards</small></div>
+          <div class="n c-navy" data-id="repo">Git repo<small>telemetry-service</small></div>
+        </div>
+      </div>
+
+      <div class="layer" data-layer>
+        <div class="lt">2 · Context (RAG)</div>
+        <div class="row">
+          <div class="n c-teal" data-id="rag">Chunk + embed</div><span class="arr">→</span>
+          <div class="n c-teal" data-id="vdb">ChromaDB<small>vectors</small></div><span class="arr">→</span>
+          <div class="n c-teal" data-id="kb">Knowledge base<small>.skills.md</small></div>
+        </div>
+      </div>
+
+      <div class="layer" data-layer>
+        <div class="lt">3 · Orchestration (LangGraph)</div>
+        <div class="row">
+          <div class="n c-purple" data-id="orch">Orchestrator<small>AI project manager</small></div>
+          <div class="n c-purple" data-id="plan">Task Planner<small>TaskPlanner.md</small></div>
+          <div class="n c-orange" data-id="guard">Guardrails<small>paths, branches</small></div>
+        </div>
+      </div>
+
+      <div class="layer" data-layer>
+        <div class="lt">4 · Build &amp; test loop (per requirement)</div>
+        <div class="row">
+          <div class="n c-violet" data-id="code">Coding Agent<small>+ SWE bots</small></div>
+          <div class="n c-violet" data-id="test">Test Agent<small>from criteria</small></div><span class="arr">→</span>
+          <div class="n c-violet" data-id="run">Run tests<small>lint + quality</small></div><span class="arr">→</span>
+          <div class="n c-red" data-id="triage">Triage<small>code/test/req</small></div>
+        </div>
+      </div>
+
+      <div class="layer" data-layer>
+        <div class="lt">5 · Review Agent</div>
+        <div class="row">
+          <div class="n c-gold" data-id="ctx">Context engine</div><span class="arr">→</span>
+          <div class="n c-gold" data-id="sec">Security</div>
+          <div class="n c-gold" data-id="pat">Pattern</div><span class="arr">→</span>
+          <div class="n c-gold" data-id="ens">Ensemble vote</div>
+        </div>
+      </div>
+
+      <div class="layer" data-layer>
+        <div class="lt">6 · Delivery</div>
+        <div class="row">
+          <div class="n c-green" data-id="git">Commit</div>
+          <div class="n c-green" data-id="gerrit">Gerrit</div>
+          <div class="n c-green" data-id="ci">CI/CD</div>
+          <div class="n c-green" data-id="dod">DoD docs</div>
+          <div class="n c-green" data-id="deploy">Deploy</div>
+          <div class="n c-green" data-id="close">Jira closed</div>
+        </div>
+      </div>
+
+      <div class="row" style="gap:6px">
+        <div class="layer" data-layer style="flex:1;margin:0">
+          <div class="lt">Shared services</div>
+          <div class="row">
+            <div class="n c-gold" data-id="llm">LLM</div>
+            <div class="n c-navy" data-id="mcp">MCP tools</div>
+            <div class="n c-navy" data-id="log">Audit log</div>
+          </div>
+        </div>
+        <div class="layer" data-layer style="flex:1.25;margin:0">
+          <div class="lt">Human gates</div>
+          <div class="row">
+            <div class="n human c-orange" data-id="hdocs" title="Approve documents">Docs</div>
+            <div class="n human c-orange" data-id="hkb" title="Approve knowledge base">KB</div>
+            <div class="n human c-orange" data-id="hmcp" title="Approve tools">Tools</div>
+            <div class="n human c-orange" data-id="hreq" title="Fix requirement">Req</div>
+            <div class="n human c-orange" data-id="hgerrit" title="Approve Gerrit push">Push</div>
+            <div class="n human c-orange" data-id="hdeploy" title="Approve each deployment">Deploy</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="dg-cap" id="cap">Scroll the story to see each part of the architecture come to life.</div>
+      <div class="dots" id="dots"></div>
+      <div class="legend"><span>System component</span><span class="lh">Human approval</span></div>
+    </div>
+  </aside>
+</div>
+
+<!-- =============================== ENDING =============================== -->
+<section class="ending">
+  <h2>The architecture in one view</h2>
+  <p>What you just followed, summarised: the moving parts, the loops that keep quality high, and what every run leaves behind.</p>
+  <div class="grid3">
+    <div class="panel">
+      <h3 style="color:var(--purple)">The AI team</h3>
+      <ul>
+        <li><b>Orchestrator</b>: plans and routes the work</li>
+        <li><b>Knowledge Base Agent</b>: extracts requirements</li>
+        <li><b>Coding Agent</b>: writes and fixes code</li>
+        <li><b>Test Agent</b>: writes tests from acceptance criteria</li>
+        <li><b>Triage Agent</b>: decides what caused a failure</li>
+        <li><b>Review Agent</b>: security, pattern and ensemble review</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h3 style="color:var(--red)">Three loops, each with a limit</h3>
+      <ul>
+        <li><b>Fix loop</b>: failed tests or lint go back to code, tests or requirement (max 3)</li>
+        <li><b>Review loop</b>: blocking findings or quality below 60 go back to code (max 2)</li>
+        <li><b>CI loop</b>: regression failures go back to code (max 2)</li>
+      </ul>
+      <p style="font-size:13px;color:var(--muted);margin:8px 0 0">The limits mean the system never runs forever; it stops and reports instead.</p>
+    </div>
+    <div class="panel">
+      <h3 style="color:var(--orange)">Where humans stay in control</h3>
+      <ul>
+        <li>Approve the requirement documents</li>
+        <li>Approve the knowledge base</li>
+        <li>Approve tool access (Gerrit MCP)</li>
+        <li>Correct a wrong requirement</li>
+        <li>Approve the Gerrit push and review the patch</li>
+        <li>Approve each deployment</li>
+      </ul>
+    </div>
+    <div class="panel wide">
+      <h3 style="color:var(--green)">What every run leaves behind (in <span class="chip">.agentic_sdlc/</span>)</h3>
+      <table>
+        <tr><td>RequirementKnowledgeBase.skills.md</td><td>The requirements and acceptance criteria the agents worked from, with their status</td></tr>
+        <tr><td>TaskPlanner.md</td><td>The tasks each requirement was broken into</td></tr>
+        <tr><td>review-&lt;REQ&gt;.json</td><td>Kept and dropped review findings, noise reduction, reviewer precision / recall / F1</td></tr>
+        <tr><td>DoD.md · traceability.md</td><td>Definition of Done checklist and the requirement → code → test → review links</td></tr>
+        <tr><td>runs/&lt;id&gt;/report.md</td><td>A readable summary of every stage of the run</td></tr>
+        <tr><td>runs/&lt;id&gt;/events.jsonl</td><td>The audit trail: every stage, file write, guardrail denial and human approval, with timestamps</td></tr>
+        <tr><td>CONCERN.md</td><td>Only when the run is blocked: why it stopped (for example, no repository)</td></tr>
+      </table>
+    </div>
+  </div>
+  <div class="moral">
+    <b>In one sentence:</b> a Jira ticket comes in, AI agents understand it, plan it, build and test it in parallel, diagnose
+    their own failures, review it with a noise-filtering vote, and deliver it through Gerrit and CI, while humans approve every
+    step that matters and every action is recorded.
+  </div>
+</section>
+
+<section class="ending">
+  <h2>Next Steps</h2>
+  <p>What we will work on next.</p>
+  <div class="panel">
+    <ol style="margin:0;padding-left:22px;font-size:15px;line-height:1.8">
+      <li><b>Identify more research papers</b> on novel code generation and code testing mechanisms.</li>
+      <li><b>Start the Proof of Concept (PoC)</b>.</li>
+      <li><b>Refine the abstract</b> with our latest understanding.</li>
+      <li><b>Start the literature research write-up</b> for submission.</li>
+    </ol>
+  </div>
+</section>
+
+<section class="ending">
+  <div class="moral" style="margin-top:0;padding:40px 26px">
+    <div style="font-size:40px;font-weight:700;color:#FFE08A;line-height:1.2">Q&amp;A</div>
+    <div style="margin-top:8px">Questions and discussion</div>
+  </div>
+</section>
+
+<footer>
+  Want the full technical view? See the <a href="Agentic_SDLC_Architecture_detailed.html">detailed layered architecture</a>
+  and the <a href="Agentic_SDLC_Flow.html">step-by-step flow diagram</a>.
+</footer>
+
+<script>
+  const scenes = [...document.querySelectorAll('.scene')];
+  const nodes = [...document.querySelectorAll('.n[data-id]')];
+  const layers = [...document.querySelectorAll('[data-layer]')];
+  const cap = document.getElementById('cap');
+  const status = document.getElementById('status');
+  const dots = document.getElementById('dots');
+
+  scenes.forEach((s, i) => {
+    const a = document.createElement('a');
+    a.href = '#' + s.id;
+    a.textContent = i + 1;
+    a.title = s.querySelector('h2').textContent;
+    dots.appendChild(a);
+  });
+  const dotLinks = [...dots.children];
+
+  function activate(scene) {
+    const on = new Set(((scene.dataset.on || '') + ' ' + (scene.dataset.human || '')).split(/\s+/).filter(Boolean));
+    nodes.forEach(n => n.classList.toggle('on', on.has(n.dataset.id)));
+    layers.forEach(l => l.classList.toggle('lit', !!l.querySelector('.n.on')));
+    scenes.forEach(s => s.classList.toggle('active', s === scene));
+    dotLinks.forEach((d, i) => d.classList.toggle('on', scenes[i] === scene));
+    cap.innerHTML = scene.dataset.cap;
+    status.textContent = 'NETOPS-101 · ' + scene.dataset.status;
+  }
+
+  function pick() {
+    const mid = window.innerHeight * 0.45;
+    let best = scenes[0], bestDist = Infinity;
+    for (const s of scenes) {
+      const r = s.querySelector('.card').getBoundingClientRect();
+      const d = r.top <= mid && r.bottom >= mid ? 0 : Math.min(Math.abs(r.top - mid), Math.abs(r.bottom - mid));
+      if (d < bestDist) { bestDist = d; best = s; }
+    }
+    activate(best);
+  }
+
+  let ticking = false;
+  window.addEventListener('scroll', () => {
+    if (!ticking) { requestAnimationFrame(() => { pick(); ticking = false; }); ticking = true; }
+  }, { passive: true });
+  window.addEventListener('resize', pick);
+  pick();
+</script>
+</body>
+</html>

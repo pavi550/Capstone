@@ -42,8 +42,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Pytest
-        run: pip install pytest
+      - name: Install package and Pytest
+        run: pip install -e . pytest
 
       - name: Run tests
         run: pytest
