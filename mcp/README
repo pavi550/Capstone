@@ -1,19 +1,21 @@
-# AI-SDLC Jira Orchestrator (MCP + Gemini)
+# AI-SDLC MCP Agents (Jira & GitHub Orchestrators)
 
-An autonomous AI-SDLC agent workflow built on the **Model Context Protocol (MCP v2.x)** and **Google Gemini (`langchain-google-genai`)**. The orchestrator dynamically discovers Jira tools from a local Python MCP server over `stdio` and manages tickets in the **Spring PetClinic (`CP`)** project.
+Autonomous AI-SDLC workflows built on the **Model Context Protocol (MCP v2.x)** and **Google Gemini (`langchain-google-genai`)**. Each domain uses its own dedicated MCP server and standalone orchestrator over `stdio`:
+1. **Jira Workflow (`ai_orchestrator.py` + `jira_mcp_server.py`)**: Discovers 5 Jira REST API v3 tools to list, create, update, comment on, and transition tickets in project **`CP`**.
+2. **GitHub PR Workflow (`github_orchestrator.py` + `github_mcp_server.py`)**: Discovers 6 GitHub REST API tools to inspect files, search code, create feature branches, commit code updates, and raise Pull Requests in **`pavi550/Capstone`**.
 
 ---
 
-## 1. Directory Layout (`Capstone/mcp/`)
-
-Place `README.md` directly inside `Capstone/mcp/` alongside the server and orchestrator scripts:
+## 1. Directory Structure (`Capstone/mcp/`)
 
 ```text
 Capstone/
 └── mcp/
-    ├── jira_mcp_server.py     # Custom MCP v2.x server exposing 5 Jira REST API v3 tools
-    ├── ai_orchestrator.py     # MCP client & ReAct agent loop powered by Gemini
-    └── README.md              # This guide
+    ├── jira_mcp_server.py        # MCP v2.x server exposing 5 Jira REST API v3 tools
+    ├── ai_orchestrator.py        # Standalone Jira orchestrator powered by Gemini
+    ├── github_mcp_server.py      # MCP v2.x server exposing 6 GitHub REST API tools
+    ├── github_orchestrator.py    # Standalone GitHub PR orchestrator powered by Gemini
+    └── README.md                 # Complete setup, configuration, and run guide
 ```
 
 ---
@@ -23,19 +25,13 @@ Capstone/
 ```text
 ┌─────────────────────────────┐         stdio (JSON-RPC)         ┌─────────────────────────────┐
 │      ai_orchestrator.py     │ ◄──────────────────────────────► │      jira_mcp_server.py     │
-│  (MCP Client + ReAct Loop)  │   1. Dynamic Tool Discovery      │   (Custom MCP v2.x Server)  │
-│  • Gemini 3.8 Flash + Pro   │   2. Tool Execution & Results    │   • list_open_jiras         │
-└─────────────────────────────┘                                  │   • create_jira_ticket      │
-                                                                 │   • update_jira_fields      │
-                                                                 │   • add_jira_comment        │
-                                                                 │   • update_jira_status      │
-                                                                 └──────────────┬──────────────┘
-                                                                                │ HTTPS (REST v3)
-                                                                                ▼
-                                                                 ┌─────────────────────────────┐
-                                                                 │       Atlassian Jira        │
-                                                                 │  capstoneprojectgrp4 (CP)   │
-                                                                 └─────────────────────────────┘
+│   (Standalone Jira Agent)   │   5 Jira Tools (list, create,    │  capstoneprojectgrp4 (CP)   │
+└─────────────────────────────┘   update, comment, transition)   └─────────────────────────────┘
+
+┌─────────────────────────────┐         stdio (JSON-RPC)         ┌─────────────────────────────┐
+│    github_orchestrator.py   │ ◄──────────────────────────────► │     github_mcp_server.py    │
+│  (Standalone GitHub Agent)  │   6 GitHub Tools (list, search,  │      pavi550/Capstone       │
+└─────────────────────────────┘   read, branch, commit, PR)      └─────────────────────────────┘
 ```
 
 ---
@@ -43,8 +39,9 @@ Capstone/
 ## 3. Prerequisites & Installation
 
 - **Python**: 3.10 or higher (tested on Python 3.13 on Windows / Git Bash)
-- **Atlassian Jira API Token**: Generated from [Atlassian Security Settings](https://id.atlassian.com/manage-profile/security/api-tokens)
-- **Google AI Studio API Key**: Generated from [Google AI Studio](https://aistudio.google.com/)
+- **Google AI Studio API Key**: Active key (`AIza...`) from [Google AI Studio](https://aistudio.google.com/apikey)
+- **Atlassian Jira API Token**: Active token from [Atlassian Security Settings](https://id.atlassian.com/manage-profile/security/api-tokens)
+- **GitHub Personal Access Token (PAT)**: Active token scoped to `pavi550/Capstone`
 
 Install required Python dependencies:
 
@@ -54,65 +51,73 @@ pip install "mcp>=2.0.0" langchain-core langchain-google-genai requests
 
 ---
 
-## 4. What Must Be Updated Before Running
+## 4. Credentials & Environment Variables
 
-### A. Environment Variables (Required)
-Both scripts read credentials from environment variables so API tokens are never hardcoded or committed to Git. Set these in your terminal session before starting:
+Both MCP servers validate credentials immediately at startup and read secrets from environment variables so no tokens are hardcoded or committed to Git.
+
+### Required Token Scopes
+- **Google Gemini (`GOOGLE_API_KEY`)**: Standard Gemini API key (`AIza...`).
+- **Atlassian Jira (`JIRA_API_TOKEN`)**: API token for `pes2pge25ds030@stu.pes.edu` with access to project `CP` on `https://capstoneprojectgrp4.atlassian.net`.
+- **GitHub (`GITHUB_TOKEN`)**:
+  - **Fine-grained PAT** (scoped to `pavi550/Capstone`): `Contents: Read and write`, `Pull requests: Read and write`, `Metadata: Read-only`.
+  - **Classic PAT**: `repo` scope.
+
+### Export Variables in Terminal (Git Bash)
 
 ```bash
-export GOOGLE_API_KEY="your_google_ai_studio_api_key"
+export GOOGLE_API_KEY="AIzaSyYourActualGoogleAIStudioKey"
 export JIRA_API_TOKEN="your_atlassian_jira_api_token"
+export GITHUB_TOKEN="your_github_personal_access_token"
+export GITHUB_OWNER="pavi550"
+export GITHUB_REPO="Capstone"
+export GITHUB_BRANCH="main"
 ```
 
-*(On Windows PowerShell, use `$env:GOOGLE_API_KEY="..."` and `$env:JIRA_API_TOKEN="..."`.)*
+*(For Windows PowerShell, use `$env:GOOGLE_API_KEY="..."`, `$env:JIRA_API_TOKEN="..."`, `$env:GITHUB_TOKEN="..."`, etc.)*
 
-### B. `jira_mcp_server.py` Checks
-- **`DOMAIN` & `EMAIL`**: Verify your Atlassian workspace URL and account email:
-  ```python
-  DOMAIN = "[https://capstoneprojectgrp4.atlassian.net](https://capstoneprojectgrp4.atlassian.net)"
-  EMAIL = "pes2pge25ds030@stu.pes.edu"
-  ```
-- **Token Guard**: `API_TOKEN` reads `JIRA_API_TOKEN` from your environment first. If unset or left as `"YOUR_ACTIVE_JIRA_TOKEN"`, the server immediately raises a `RuntimeError` at startup before making any LLM or Jira API calls.
+### Quick Pre-Flight Checks
+```bash
+# 1. Verify Google API Key
+curl -s "[https://generativelanguage.googleapis.com/v1beta/models?key=$GOOGLE_API_KEY](https://generativelanguage.googleapis.com/v1beta/models?key=$GOOGLE_API_KEY)" | head -n 5
 
-### C. `ai_orchestrator.py` Checks
-- **Dynamic Server Path (`__file__`)**: Resolve `jira_mcp_server.py` relative to `ai_orchestrator.py` so it runs cleanly whether launched from `Capstone/` or `Capstone/mcp/`:
-  ```python
-  BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-  SERVER_SCRIPT = os.path.join(BASE_DIR, "jira_mcp_server.py")
-  server_params = StdioServerParameters(command=sys.executable, args=[SERVER_SCRIPT])
-  ```
-- **MCP v2.x Schema Attribute**: Ensure the tool-translator loop uses `tool.input_schema` (snake_case for `mcp>=2.0.0`).
-- **Gemini Primary & Fallback Models**: Ensure `primary_llm` and `fallback_llm` use active models enabled on your API key (`gemini-3.8-flash` with `gemini-3.8-pro` fallback). To inspect valid model names on your key:
-  ```bash
-  python -c "import os; from google import genai; client = genai.Client(api_key=os.getenv('GOOGLE_API_KEY')); print('\n'.join(m.name for m in client.models.list() if 'generateContent' in m.supported_actions))"
-  ```
-- **Agent Goal (`prompt`)**: Update the `prompt` string in `run_ai_orchestrator()` to define the Jira actions (creating, updating fields, adding comments, or changing statuses) you want Gemini to execute.
+# 2. Verify Jira Auth & Project CP
+curl -s -u "pes2pge25ds030@stu.pes.edu:$JIRA_API_TOKEN" "[https://capstoneprojectgrp4.atlassian.net/rest/api/3/project/CP](https://capstoneprojectgrp4.atlassian.net/rest/api/3/project/CP)" | grep '"key"'
+
+# 3. Verify GitHub Repo Access & Default Branch
+curl -s -H "Authorization: Bearer $GITHUB_TOKEN" "[https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO](https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO)" | grep -E '"full_name"|"default_branch"'
+```
 
 ---
 
-## 5. How to Start `ai_orchestrator.py`
+## 5. Script Configuration Summary
 
-> **Important:** Do **not** run `jira_mcp_server.py` manually. `ai_orchestrator.py` automatically launches `jira_mcp_server.py` as a background subprocess over `stdio`, discovers its tools, runs the workflow, and terminates it cleanly on exit.
+### A. Jira Scripts (`jira_mcp_server.py` & `ai_orchestrator.py`)
+- **`DOMAIN` & `EMAIL`**: Configured for `https://capstoneprojectgrp4.atlassian.net` and `pes2pge25ds030@stu.pes.edu`.
+- **Token Guard**: `jira_mcp_server.py` raises a `RuntimeError` at startup if `JIRA_API_TOKEN` is unset or still set to `"YOUR_ACTIVE_JIRA_TOKEN"`.
+- **Path & Model Resilience**: `ai_orchestrator.py` resolves `jira_mcp_server.py` dynamically via `os.path.dirname(os.path.abspath(__file__))` and uses `gemini-3.8-flash` with a `gemini-3.8-pro` fallback.
+- **Customizing Tasks**: Edit the `prompt` variable inside `ai_orchestrator.py` to specify which `CP` tickets to create, update, comment on, or transition.
 
-### Option 1: Run from inside `Capstone/mcp`
-```bash
-cd ~/Capstone/mcp
-export GOOGLE_API_KEY="your_google_ai_studio_api_key"
-export JIRA_API_TOKEN="your_atlassian_jira_api_token"
+### B. GitHub Scripts (`github_mcp_server.py` & `github_orchestrator.py`)
+- **Token Guard**: `github_mcp_server.py` raises a `RuntimeError` at startup if `GITHUB_TOKEN` or `GITHUB_OWNER` is missing.
+- **Branch Safety Guard**: `commit_file_change` blocks direct commits to `main`/`master`, requiring Gemini to create a feature branch via `create_branch` first.
+- **Automatic Blob SHA Resolution**: Automatically fetches the existing file's SHA when modifying an existing file so both new file creation (`HTTP 201`) and updates (`HTTP 200`) work seamlessly.
+- **Timeout Resilience**: `github_orchestrator.py` uses `timeout=120` and `max_retries=2` across `gemini-3.8-flash` and `gemini-3.8-pro` to prevent `504 DEADLINE_EXCEEDED` during full-file code generation.
+- **Customizing Tasks**: Edit the `prompt` variable inside `github_orchestrator.py` to specify what code changes Gemini should implement and PR.
 
-python -u ai_orchestrator.py
-```
+---
 
-### Option 2: Run from root `Capstone`
+## 6. How to Start Each Orchestrator
+
+> **Important:** Do **not** run `jira_mcp_server.py` or `github_mcp_server.py` manually. Each orchestrator automatically launches its respective MCP server as a background subprocess over `stdio`, discovers its tools, runs the workflow, and terminates the child process on exit.
+
+### Workflow 1: Run the Jira Orchestrator (`ai_orchestrator.py`)
+From `~/Capstone` (or `~/Capstone/mcp`):
 ```bash
 cd ~/Capstone
-export GOOGLE_API_KEY="your_google_ai_studio_api_key"
-export JIRA_API_TOKEN="your_atlassian_jira_api_token"
-
 python -u mcp/ai_orchestrator.py
 ```
 
-### Expected Console Output
+**Expected Output:**
 ```text
 🔌 Connected! Gemini dynamically learned 5 tools via MCP.
 
@@ -125,27 +130,65 @@ python -u mcp/ai_orchestrator.py
 ...
 ```
 
+### Workflow 2: Run the GitHub PR Orchestrator (`github_orchestrator.py`)
+From `~/Capstone` (or `~/Capstone/mcp`):
+```bash
+cd ~/Capstone
+python -u mcp/github_orchestrator.py
+```
+
+**Expected Output:**
+```text
+🔌 Connected to GitHub MCP Server! Learned 6 tools.
+
+🤖 Gemini is inspecting pavi550/Capstone and preparing a PR...
+
+   ⚙️ Gemini executing MCP Tool: list_repo_files
+   ⚙️ Gemini executing MCP Tool: read_file
+   ⚙️ Gemini executing MCP Tool: create_branch
+   ⚙️ Gemini executing MCP Tool: commit_file_change
+   ⚙️ Gemini executing MCP Tool: create_pull_request
+
+✅ Final GitHub PR Agent Report:
+... (includes direct URL to the newly opened Pull Request)
+```
+
+*(Always pass `-u` so Python streams `asyncio` tool execution logs in real time.)*
+
 ---
 
-## 6. Available MCP Tools (`jira_mcp_server.py`)
+## 7. Available MCP Tools Reference
 
+### Jira MCP Tools (`jira_mcp_server.py` — 5 Tools)
 | Tool Name | Parameters | Purpose |
 | :--- | :--- | :--- |
-| `list_open_jiras` | `project_key: str = "CP"` | Lists all open (non-Done) Jira issues and their current statuses. |
+| `list_open_jiras` | `project_key="CP"` | Lists all open (non-Done) Jira tickets and their current statuses. |
 | `create_jira_ticket` | `summary`, `description`, `project_key="CP"`, `issue_type="Task"` | Creates a new Jira ticket formatted in Atlassian Document Format (ADF). |
 | `update_jira_fields` | `issue_key`, `summary=""`, `description=""` | Updates the title and/or description of an existing ticket (e.g., `CP-2`). |
-| `add_jira_comment` | `issue_key`, `comment_text` | Appends code review notes, agent logs, or PR links onto an existing ticket. |
-| `update_jira_status` | `issue_key`, `target_status` | Resolves valid workflow transition IDs and moves a ticket (`To Do` → `In Progress` → `Done`). |
+| `add_jira_comment` | `issue_key`, `comment_text` | Posts review notes, logs, or PR links onto an existing ticket. |
+| `update_jira_status` | `issue_key`, `target_status` | Resolves workflow transition IDs and moves a ticket (`To Do` → `In Progress` → `Done`). |
+
+### GitHub MCP Tools (`github_mcp_server.py` — 6 Tools)
+| Tool Name | Parameters | Purpose |
+| :--- | :--- | :--- |
+| `list_repo_files` | `branch="main"`, `path_prefix=""`, `extension=".java"` | Lists repository files via GitHub Git Trees API. Pass `extension=""` to list all file types. |
+| `search_repo_code` | `keyword` | Searches across `pavi550/Capstone` for classes, methods, or keywords. |
+| `read_file` | `file_path`, `branch="main"`, `start_line=1`, `end_line=300` | Fetches and decodes source files with line numbers for code comprehension. |
+| `create_branch` | `new_branch_name`, `base_branch="main"` | Cuts a new feature branch from the latest commit SHA of the base branch. |
+| `commit_file_change` | `file_path`, `updated_full_content`, `commit_message`, `branch` | Creates or updates a file on a feature branch (auto-resolves existing file SHA; blocks direct commits to `main`). |
+| `create_pull_request` | `title`, `body`, `head_branch`, `base_branch="main"` | Raises a Pull Request on GitHub and returns the PR number and HTML URL. |
 
 ---
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
-| Error / Symptom | Cause | Fix |
+| Error / Symptom | Cause | Resolution |
 | :--- | :--- | :--- |
-| `RuntimeError: CRITICAL: JIRA_API_TOKEN is not updated` | `JIRA_API_TOKEN` is missing or still set to the placeholder string. | Export `JIRA_API_TOKEN` in your current shell before launching `ai_orchestrator.py`. |
-| `ToolError: Jira Authentication Failed (HTTP 401/403)` | Jira API token is expired, invalid, or lacks project access. | Generate a new token in Atlassian Account Settings and re-export it. |
-| `FileNotFoundError` on `jira_mcp_server.py` | Orchestrator launched without `__file__` path resolution. | Use `os.path.join(os.path.dirname(os.path.abspath(__file__)), "jira_mcp_server.py")`. |
-| `404 NOT_FOUND` on Gemini model | Outdated or disabled model name on your API key. | Run the `client.models.list()` one-liner in Section 4C and update the model string. |
-| `503 UNAVAILABLE` from Gemini | Temporary server load spike on the primary Gemini model. | Keep `.with_fallbacks([fallback_llm])` and `max_retries=2` enabled. |
-| Terminal appears frozen after `"Gemini is thinking..."` | Windows `stdio` output buffering inside `asyncio`. | Always pass `-u` (`python -u ai_orchestrator.py`). |
+| `RuntimeError: CRITICAL: JIRA_API_TOKEN is not updated` | `JIRA_API_TOKEN` is unset or still a placeholder. | Export `JIRA_API_TOKEN` in your current shell before starting `ai_orchestrator.py`. |
+| `RuntimeError: CRITICAL: GITHUB_TOKEN and GITHUB_OWNER must be set` | `GITHUB_TOKEN` or `GITHUB_OWNER` is missing. | Export `GITHUB_TOKEN` and `GITHUB_OWNER="pavi550"` before starting `github_orchestrator.py`. |
+| `ToolError: Jira Authentication Failed (HTTP 401/403)` | Jira token expired or lacks project `CP` permissions. | Generate a new token in Atlassian Account Settings and re-export. |
+| `ToolError: GitHub Auth/Permission Error (HTTP 401/403)` | GitHub PAT expired or lacks `Contents` / `Pull requests` write access. | Regenerate PAT with write permissions (or classic `repo` scope). |
+| `ToolError: GitHub Not Found (404)` | Branch mismatch (`main` vs `master`) or invalid file path. | Run the GitHub `curl` check in Section 4 to verify `"default_branch"`. |
+| `400 INVALID_ARGUMENT (API_KEY_INVALID)` | `GOOGLE_API_KEY` is missing, malformed, or revoked. | Generate a fresh `AIza...` key in Google AI Studio and re-export. |
+| `504 DEADLINE_EXCEEDED` | Generating full code files exceeded the LLM request timeout. | Ensure `timeout=120` is set on `ChatGoogleGenerativeAI` in `github_orchestrator.py`. |
+| `503 UNAVAILABLE` from Gemini | Temporary demand spike on `gemini-3.8-flash`. | Keep `.with_fallbacks([fallback_llm])` configured with `gemini-3.8-pro`. |
