@@ -15,73 +15,95 @@ async def run_github_pr_workflow():
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
     server_script = os.path.join(base_dir, "github_mcp_server.py")
+    err_log_path = os.path.join(base_dir, "github_server_err.log")
+
+    child_env = os.environ.copy()
+    child_env["PYTHONUNBUFFERED"] = "1"
+    child_env["PYTHONUTF8"] = "1"
 
     server_params = StdioServerParameters(
         command=sys.executable,
-        args=[server_script]
+        args=["-u", server_script],
+        env=child_env
     )
 
-    async with stdio_client(server_params) as (read_stream, write_stream):
-        async with ClientSession(read_stream, write_stream) as session:
-            await session.initialize()
+    try:
+        with open(err_log_path, "w", encoding="utf-8") as err_file:
+            async with stdio_client(server_params, errlog=err_file) as (read_stream, write_stream):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
 
-            mcp_tools = await session.list_tools()
-            llm_tools = [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": tool.name,
-                        "description": tool.description,
-                        "parameters": tool.input_schema
-                    }
-                }
-                for tool in mcp_tools.tools
-            ]
+                    mcp_tools = await session.list_tools()
+                    llm_tools = [
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": tool.name,
+                                "description": tool.description,
+                                "parameters": tool.input_schema
+                            }
+                        }
+                        for tool in mcp_tools.tools
+                    ]
 
-            print(f"🔌 Connected to GitHub MCP Server! Learned {len(llm_tools)} tools.")
+                    print(f"🔌 Connected to GitHub MCP Server! Learned {len(llm_tools)} tools.")
 
-            primary_llm = ChatGoogleGenerativeAI(
-                model="gemini-3.5-flash-lite", temperature=0, max_retries=2, timeout=120
-            ).bind_tools(llm_tools)
-            fallback_llm = ChatGoogleGenerativeAI(
-                model="gemini-3.8-pro", temperature=0, max_retries=2, timeout=120
-            ).bind_tools(llm_tools)
-            llm_with_tools = primary_llm.with_fallbacks([fallback_llm])
+                    primary_llm = ChatGoogleGenerativeAI(
+                        model="gemini-3.5-flash-lite",
+                        temperature=0,
+                        max_retries=2,
+                        timeout=120
+                    ).bind_tools(llm_tools)
 
-            # Customize this prompt for the exact change you want Gemini to implement and PR
-            prompt = """
-            You are an autonomous AI-SDLC developer working on repository pavi550/Capstone.
-            1. Use `list_repo_files` (with extension="") to inspect the repository structure.
-            2. Use `read_file` to understand the existing files and architecture.
-            3. Create a new feature branch named `feat/mcp-github-pr-demo` using `create_branch`.
-            4. Add a clean `ARCHITECTURE.md` file (or update an existing file) using `commit_file_change` documenting the MCP GitHub & Jira SDLC workflow.
-            5. Raise a Pull Request into `main` using `create_pull_request` with a clear summary of changes, and share the PR link.
-            """
+                    fallback_llm = ChatGoogleGenerativeAI(
+                        model="gemini-3.8-pro",
+                        temperature=0,
+                        max_retries=2,
+                        timeout=120
+                    ).bind_tools(llm_tools)
 
-            messages = [HumanMessage(content=prompt)]
-            print("\n🤖 Gemini is inspecting pavi550/Capstone and preparing a PR...\n")
+                    llm_with_tools = primary_llm.with_fallbacks([fallback_llm])
 
-            while True:
-                response = await llm_with_tools.ainvoke(messages)
-                messages.append(response)
+                    prompt = """
+                    You are an autonomous AI-SDLC developer working on repository pavi550/Capstone.
+                    1. Use `list_repo_files` (with extension="") to inspect the repository structure.
+                    2. Use `read_file` to understand the existing files and architecture.
+                    """
 
-                if not response.tool_calls:
-                    print("\n✅ Final GitHub PR Agent Report:")
-                    print(response.content)
-                    break
+                    messages = [HumanMessage(content=prompt)]
+                    print("\n🤖 Gemini is inspecting pavi550/Capstone and preparing a PR...\n")
 
-                for tool_call in response.tool_calls:
-                    t_name = tool_call["name"]
-                    print(f"   ⚙️ Gemini executing MCP Tool: {t_name}")
+                    while True:
+                        response = await llm_with_tools.ainvoke(messages)
+                        messages.append(response)
 
-                    mcp_result = await session.call_tool(t_name, arguments=tool_call["args"])
-                    result_text = "\n".join(item.text for item in mcp_result.content if hasattr(item, "text"))
+                        if not response.tool_calls:
+                            print("\n✅ Final GitHub PR Agent Report:")
+                            print(response.content)
+                            break
 
-                    messages.append(ToolMessage(
-                        tool_call_id=tool_call["id"],
-                        name=t_name,
-                        content=result_text
-                    ))
+                        for tool_call in response.tool_calls:
+                            t_name = tool_call["name"]
+                            print(f"   ⚙️ Gemini executing MCP Tool: {t_name}")
+
+                            mcp_result = await session.call_tool(t_name, arguments=tool_call["args"])
+                            result_text = "\n".join(
+                                item.text for item in mcp_result.content if hasattr(item, "text")
+                            )
+
+                            messages.append(ToolMessage(
+                                tool_call_id=tool_call["id"],
+                                name=t_name,
+                                content=result_text
+                            ))
+    except Exception:
+        if os.path.exists(err_log_path):
+            with open(err_log_path, "r", encoding="utf-8") as f:
+                server_stderr = f.read().strip()
+            if server_stderr:
+                print("\n🚨 Subprocess Server Error (github_server_err.log):")
+                print(server_stderr)
+        raise
 
 
 if __name__ == "__main__":

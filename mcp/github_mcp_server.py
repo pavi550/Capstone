@@ -1,8 +1,12 @@
-import os
+import asyncio
 import base64
+import os
 import requests
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+
+if os.name == "nt":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 mcp = MCPServer("Capstone-GitHub-SDLC-Server")
 
@@ -11,9 +15,9 @@ GITHUB_OWNER = os.getenv("GITHUB_OWNER", "pavi550").strip()
 GITHUB_REPO = os.getenv("GITHUB_REPO", "Capstone").strip()
 DEFAULT_BASE_BRANCH = os.getenv("GITHUB_BRANCH", "main").strip()
 
-if not GITHUB_TOKEN or not GITHUB_OWNER:
+if not GITHUB_TOKEN:
     raise RuntimeError(
-        "CRITICAL: GITHUB_TOKEN and GITHUB_OWNER must be set as environment variables before starting."
+        "CRITICAL: GITHUB_TOKEN is not set. Export GITHUB_TOKEN in your terminal before starting."
     )
 
 HEADERS = {
@@ -29,7 +33,7 @@ def _check_response(response: requests.Response, expected_codes: tuple[int, ...]
     if response.status_code in (401, 403):
         raise ToolError(
             f"GitHub Auth/Permission Error (HTTP {response.status_code}) while {action}: "
-            "Ensure GITHUB_TOKEN has 'repo' (classic) or 'Contents: Read & Write' + 'Pull requests: Read & Write' scopes."
+            "Ensure GITHUB_TOKEN has Contents and Pull requests Read & Write permissions."
         )
     if response.status_code == 404:
         raise ToolError(
@@ -40,13 +44,9 @@ def _check_response(response: requests.Response, expected_codes: tuple[int, ...]
         raise ToolError(f"GitHub API Error while {action} (HTTP {response.status_code}): {response.text}")
 
 
-# ==============================================================================
-# PHASE 1: READ & UNDERSTAND THE CODEBASE
-# ==============================================================================
-
 @mcp.tool()
 def list_repo_files(branch: str = DEFAULT_BASE_BRANCH, path_prefix: str = "", extension: str = ".java") -> str:
-    """List files in the GitHub repository on a given branch. Use path_prefix (e.g., 'src/main/java') or extension (e.g., '.java', '.xml') to filter."""
+    """List files in the GitHub repository on a branch. Pass extension='' for all files."""
     url = f"{API_BASE}/git/trees/{branch}?recursive=1"
     response = requests.get(url, headers=HEADERS, timeout=15)
     _check_response(response, (200,), f"listing files on branch '{branch}'")
@@ -92,7 +92,7 @@ def search_repo_code(keyword: str) -> str:
 
 @mcp.tool()
 def read_file(file_path: str, branch: str = DEFAULT_BASE_BRANCH, start_line: int = 1, end_line: int = 300) -> str:
-    """Read source code lines from a file on GitHub (e.g., 'src/main/java/org/springframework/samples/petclinic/owner/Pet.java')."""
+    """Read source code lines from a file on GitHub."""
     clean_path = file_path.strip("/")
     url = f"{API_BASE}/contents/{clean_path}"
     response = requests.get(url, headers=HEADERS, params={"ref": branch}, timeout=15)
@@ -112,23 +112,17 @@ def read_file(file_path: str, branch: str = DEFAULT_BASE_BRANCH, start_line: int
     return f"--- {clean_path} ({branch}, lines {start}-{end} of {total}) ---\n" + "\n".join(numbered)
 
 
-# ==============================================================================
-# PHASE 2: CREATE BRANCH, APPLY CODE CHANGES & RAISE PULL REQUEST
-# ==============================================================================
-
 @mcp.tool()
 def create_branch(new_branch_name: str, base_branch: str = DEFAULT_BASE_BRANCH) -> str:
-    """Create a new feature branch (e.g., 'feat/cp-2-pet-breed-weight') from the base branch before committing code changes."""
+    """Create a new feature branch from the base branch before committing code changes."""
     if new_branch_name.strip() == base_branch.strip():
         raise ToolError("New branch name must be different from the base branch.")
 
-    # 1. Get latest commit SHA of base_branch
     ref_url = f"{API_BASE}/git/ref/heads/{base_branch}"
     ref_res = requests.get(ref_url, headers=HEADERS, timeout=15)
     _check_response(ref_res, (200,), f"fetching SHA for base branch '{base_branch}'")
     base_sha = ref_res.json()["object"]["sha"]
 
-    # 2. Create new branch reference
     create_url = f"{API_BASE}/git/refs"
     payload = {"ref": f"refs/heads/{new_branch_name.strip()}", "sha": base_sha}
     create_res = requests.post(create_url, headers=HEADERS, json=payload, timeout=15)
@@ -142,14 +136,13 @@ def create_branch(new_branch_name: str, base_branch: str = DEFAULT_BASE_BRANCH) 
 
 @mcp.tool()
 def commit_file_change(file_path: str, updated_full_content: str, commit_message: str, branch: str) -> str:
-    """Create or update a file on a feature branch with complete, valid source code. Never commit directly to 'main'."""
+    """Create or update a file on a feature branch with complete source code."""
     if branch.strip() in ("main", "master", DEFAULT_BASE_BRANCH):
         raise ToolError(f"Safety block: Direct commits to '{branch}' are forbidden. Create a feature branch first.")
 
     clean_path = file_path.strip("/")
     url = f"{API_BASE}/contents/{clean_path}"
 
-    # 1. Check if file already exists on the branch to retrieve its blob SHA (required by GitHub API for updates)
     existing_sha = None
     get_res = requests.get(url, headers=HEADERS, params={"ref": branch}, timeout=15)
     if get_res.status_code == 200 and isinstance(get_res.json(), dict):
@@ -157,7 +150,6 @@ def commit_file_change(file_path: str, updated_full_content: str, commit_message
     elif get_res.status_code not in (200, 404):
         _check_response(get_res, (200, 404), f"checking existing file '{clean_path}'")
 
-    # 2. Encode updated content to Base64 and commit
     encoded_content = base64.b64encode(updated_full_content.encode("utf-8")).decode("utf-8")
     payload = {
         "message": commit_message,
@@ -177,7 +169,7 @@ def commit_file_change(file_path: str, updated_full_content: str, commit_message
 
 @mcp.tool()
 def create_pull_request(title: str, body: str, head_branch: str, base_branch: str = DEFAULT_BASE_BRANCH) -> str:
-    """Raise a Pull Request on GitHub merging head_branch into base_branch after committing changes."""
+    """Raise a Pull Request on GitHub merging head_branch into base_branch."""
     url = f"{API_BASE}/pulls"
     payload = {
         "title": title,
@@ -193,5 +185,4 @@ def create_pull_request(title: str, body: str, head_branch: str, base_branch: st
 
 
 if __name__ == "__main__":
-    mcp.run()
-
+    mcp.run(transport="stdio")
