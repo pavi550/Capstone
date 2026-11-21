@@ -1,8 +1,9 @@
 import os
+
 import requests
-from requests.auth import HTTPBasicAuth
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from requests.auth import HTTPBasicAuth
 
 mcp = MCPServer("Capstone-Jira-Server")
 

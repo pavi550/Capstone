@@ -1,10 +1,12 @@
 import asyncio
 import os
 import sys
+from pathlib import Path
+
 from langchain_core.messages import HumanMessage, ToolMessage
-from mcp.client.stdio import stdio_client, StdioServerParameters
-from mcp.client.session import ClientSession
 from llm_provider import get_llm_with_tools
+from mcp.client.session import ClientSession
+from mcp.client.stdio import StdioServerParameters, stdio_client
 
 
 async def run_ai_orchestrator():
@@ -26,68 +28,73 @@ async def run_ai_orchestrator():
         env=child_env
     )
 
+    err_file = await asyncio.to_thread(open, err_log_path, "w", encoding="utf-8")
     try:
-        with open(err_log_path, "w", encoding="utf-8") as err_file:
-            async with stdio_client(server_params, errlog=err_file) as (read_stream, write_stream):
-                async with ClientSession(read_stream, write_stream) as session:
-                    await session.initialize()
+        async with (
+            stdio_client(server_params, errlog=err_file) as (read_stream, write_stream),
+            ClientSession(read_stream, write_stream) as session,
+        ):
+            await session.initialize()
 
-                    mcp_tools = await session.list_tools()
-                    llm_tools = [
-                        {
-                            "type": "function",
-                            "function": {
-                                "name": tool.name,
-                                "description": tool.description,
-                                "parameters": tool.input_schema
-                            }
-                        }
-                        for tool in mcp_tools.tools
-                    ]
+            mcp_tools = await session.list_tools()
+            llm_tools = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.input_schema
+                    }
+                }
+                for tool in mcp_tools.tools
+            ]
 
-                    print(f"🔌 Connected! Learned {len(llm_tools)} Jira tools via MCP.")
-                    llm_with_tools = get_llm_with_tools(llm_tools)
+            print(f"🔌 Connected! Learned {len(llm_tools)} Jira tools via MCP.")
+            llm_with_tools = get_llm_with_tools(llm_tools)
 
-                    prompt = """
-                    You are an AI Project Manager for project CP.
-                    1. Call `list_open_jiras` to check all currently open tickets in project CP.
-                    2. Summarize the open tickets clearly with their keys, issue types, and current statuses.
-                    """
+            prompt = """
+            You are an AI Project Manager for project CP.
+            1. Call `list_open_jiras` to check all currently open tickets in project CP.
+            2. Summarize the open tickets clearly with their keys, issue types, and current statuses.
+            """
 
-                    messages = [HumanMessage(content=prompt)]
-                    print("\n🤖 Orchestrating the Jira workflow...\n")
+            messages = [HumanMessage(content=prompt)]
+            print("\n🤖 Orchestrating the Jira workflow...\n")
 
-                    while True:
-                        response = await llm_with_tools.ainvoke(messages)
-                        messages.append(response)
+            while True:
+                response = await llm_with_tools.ainvoke(messages)
+                messages.append(response)
 
-                        if not response.tool_calls:
-                            print("\n✅ Final AI Project Manager Report:")
-                            print(response.content)
-                            break
+                if not response.tool_calls:
+                    print("\n✅ Final AI Project Manager Report:")
+                    print(response.content)
+                    break
 
-                        for tool_call in response.tool_calls:
-                            t_name = tool_call["name"]
-                            print(f"   ⚙️ Executing MCP Tool: {t_name}")
+                for tool_call in response.tool_calls:
+                    t_name = tool_call["name"]
+                    print(f"   ⚙️ Executing MCP Tool: {t_name}")
 
-                            mcp_result = await session.call_tool(t_name, arguments=tool_call["args"])
-                            result_text = "\n".join(
-                                item.text for item in mcp_result.content if hasattr(item, "text")
-                            )
+                    mcp_result = await session.call_tool(t_name, arguments=tool_call["args"])
+                    result_text = "\n".join(
+                        item.text for item in mcp_result.content if hasattr(item, "text")
+                    )
 
-                            messages.append(ToolMessage(
-                                tool_call_id=tool_call["id"],
-                                name=t_name,
-                                content=result_text
-                            ))
+                    messages.append(ToolMessage(
+                        tool_call_id=tool_call["id"],
+                        name=t_name,
+                        content=result_text
+                    ))
     except Exception:
         if os.path.exists(err_log_path):
-            with open(err_log_path, "r", encoding="utf-8") as f:
-                server_stderr = f.read().strip()
+            server_stderr = (
+                await asyncio.to_thread(Path(err_log_path).read_text, encoding="utf-8")
+            ).strip()
             if server_stderr:
                 print("\n🚨 Subprocess Server Error (jira_server_err.log):")
                 print(server_stderr)
         raise
+    finally:
+        await asyncio.to_thread(err_file.close)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 import os
+
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 
@@ -45,4 +46,3 @@ def get_llm_with_tools(llm_tools: list[dict]):
     ).bind_tools(llm_tools)
     print("🧠 Active LLM Provider: Gemini (gemini-3.8-flash -> gemini-3.8-pro)")
     return primary.with_fallbacks([fallback])
-
