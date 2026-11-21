@@ -26,7 +26,9 @@ or Jira, GitHub, or cloud credentials.
 
 ### 1. Clone and install
 
-With Git and Python 3.11+ installed, run these commands in PowerShell.
+With Git and Python 3.11+ installed, use the commands for your shell.
+
+**PowerShell**
 
 ```powershell
 git clone --branch makeitgeneric https://github.com/pavi550/Capstone.git
@@ -35,15 +37,38 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]" -r mcp/requirements.txt
 ```
 
+**Bash**
+
+```bash
+git clone --branch makeitgeneric https://github.com/pavi550/Capstone.git
+cd Capstone
+python -m venv .venv
+source .venv/Scripts/activate  # Git Bash on Windows
+python -m pip install -e ".[dev]" -r mcp/requirements.txt
+```
+
+On Linux or macOS, use `python3 -m venv .venv` and
+`source .venv/bin/activate` in the setup block. Run the remaining Bash
+commands with the virtual environment active. If you open a new terminal,
+activate it again from the repository root.
+
 If you already cloned the repository, use `git fetch origin` and
-`git switch makeitgeneric` from your clone. In Git Bash, use
-`./.venv/Scripts/python.exe` in place of the PowerShell Python path.
+`git switch makeitgeneric` from your clone.
 
 ### 2. Run the mocked tests
+
+**PowerShell**
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q tests/test_ollama_integration.py -k mocked
 .\.venv\Scripts\python.exe -m pytest -q -rs
+```
+
+**Bash**
+
+```bash
+python -m pytest -q tests/test_ollama_integration.py -k mocked
+python -m pytest -q -rs
 ```
 
 The first command should report one pass. The full suite skips the live
@@ -55,10 +80,18 @@ Install [Ollama](https://ollama.com/download) and run `ollama list`. If the
 server is stopped, run `ollama serve` in a separate terminal. If the model is
 missing, download it manually with `ollama pull qwen3:8b` (about 5.2 GB).
 
+**PowerShell**
+
 ```powershell
 $env:CAPSTONE_TEST_OLLAMA = "1"
 .\.venv\Scripts\python.exe -m pytest -q -s -rs tests/test_ollama_integration.py
 Remove-Item Env:CAPSTONE_TEST_OLLAMA
+```
+
+**Bash**
+
+```bash
+CAPSTONE_TEST_OLLAMA=1 python -m pytest -q -s -rs tests/test_ollama_integration.py
 ```
 
 Expect two passes and a line reporting one read-only tool call and its
@@ -73,6 +106,8 @@ From the repository root, create your private configuration once.
 ```powershell
 Copy-Item .env.example .env
 ```
+
+In Bash, use `cp .env.example .env`.
 
 Choose **one** provider to start. Edit those rows in `.env` and leave
 `LLM_FALLBACK_PROVIDERS` empty.
@@ -97,8 +132,9 @@ needs service credentials to access real Jira or GitHub data.
   Contents and Pull requests read/write permissions. This demo can create
   a branch, commit, and pull request.
 
-From `mcp`, run `run.bat jira` or `run.bat github` in Windows CMD, or
-`source run.sh jira` or `source run.sh github` in Git Bash. Start with Jira
+From `mcp`, run `run.bat jira` or `run.bat github` in Windows CMD.
+In Bash, run `cd mcp` from the repository root, then use
+`source ./run.sh jira` or `source ./run.sh github`. Start with Jira
 to verify a read-only workflow. A successful run lists the open issues in
 `CP` and prints a summary. Hosted providers may receive issue or repository
 content and charge for API usage. Keep credentials in your ignored `.env`.
