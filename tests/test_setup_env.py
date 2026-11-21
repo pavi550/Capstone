@@ -97,10 +97,10 @@ def test_existing_config_can_add_all_services_without_replacing_model(monkeypatc
     assert values["GITHUB_TOKEN"] == "fixture-token"
     assert "# Keep this comment" in private_env.read_text(encoding="utf-8-sig")
     output = capsys.readouterr().out
-    assert "Jira site URL:" in output and "Example: https://example.atlassian.net." in output
-    assert "Jira account email:" in output and "Example: tester@example.com." in output
-    assert "Confluence site URL:" in output and "Example: https://example.atlassian.net/wiki." in output
-    assert "GitHub repository:" in output and "https://github.com/your-org/capstone-test.git" in output
+    assert "Jira site URL:" in output and "Example: https://capstoneprojectgrp4.atlassian.net/." in output
+    assert "Jira account email:" in output and "Example: PES2PGE25DS065@stu.pes.edu." in output
+    assert "Confluence site URL:" in output and "Example: https://capstoneprojectgrp4.atlassian.net/wiki/." in output
+    assert "GitHub repository:" in output and "https://github.com/pavi550/Capstone.git" in output
     assert "fixture-token" not in output
 
 

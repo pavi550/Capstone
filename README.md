@@ -115,11 +115,11 @@ if you only want to use Ollama. Replace these example inputs with your own.
 
 | Prompt | Example input |
 | --- | --- |
-| Jira site URL | `https://example.atlassian.net` |
-| Jira account email | `tester@example.com` |
-| Confluence site URL | `https://example.atlassian.net/wiki` |
-| Confluence account email | `tester@example.com` |
-| GitHub repository | `your-org/capstone-test` or `https://github.com/your-org/capstone-test.git` |
+| Jira site URL | `https://capstoneprojectgrp4.atlassian.net/` |
+| Jira account email | `PES2PGE25DS065@stu.pes.edu` |
+| Confluence site URL | `https://capstoneprojectgrp4.atlassian.net/wiki/` |
+| Confluence account email | `PES2PGE25DS065@stu.pes.edu` |
+| GitHub repository | `pavi550/Capstone` or `https://github.com/pavi550/Capstone.git` |
 | GitHub base branch | `main` or the name of an existing test branch |
 | Hidden token prompts | Paste the API token for that service. The terminal keeps the input hidden. |
 

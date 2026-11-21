@@ -228,10 +228,10 @@ def service_settings(selected):
         print("Create an Atlassian API token at https://id.atlassian.com/manage-profile/security/api-tokens.")
         return {
             "JIRA_BASE_URL": validated_answer(
-                "Jira site URL", "https://example.atlassian.net",
+                "Jira site URL", "https://capstoneprojectgrp4.atlassian.net/",
                 lambda url: endpoint(url, "JIRA_BASE_URL"),
             ),
-            "JIRA_EMAIL": validated_answer("Jira account email", "tester@example.com", email_address),
+            "JIRA_EMAIL": validated_answer("Jira account email", "PES2PGE25DS065@stu.pes.edu", email_address),
             "JIRA_API_TOKEN": ask("Jira API token", secret=True),
         }
     if selected == "confluence":
@@ -239,10 +239,10 @@ def service_settings(selected):
         print("Use an Atlassian API token from https://id.atlassian.com/manage-profile/security/api-tokens.")
         return {
             "CONFLUENCE_BASE_URL": validated_answer(
-                "Confluence site URL", "https://example.atlassian.net/wiki", confluence_url,
+                "Confluence site URL", "https://capstoneprojectgrp4.atlassian.net/wiki/", confluence_url,
             ),
             "CONFLUENCE_EMAIL": validated_answer(
-                "Confluence account email", "tester@example.com", email_address,
+                "Confluence account email", "PES2PGE25DS065@stu.pes.edu", email_address,
             ),
             "CONFLUENCE_API_TOKEN": ask("Confluence API token", secret=True),
         }
@@ -251,7 +251,7 @@ def service_settings(selected):
         print("Create a GitHub personal access token at https://github.com/settings/tokens.")
         print("Grant Contents and Pull requests read/write access for the selected repository.")
         owner, repo = validated_answer(
-            "GitHub repository", "your-org/capstone-test or https://github.com/your-org/capstone-test.git",
+            "GitHub repository", "pavi550/Capstone or https://github.com/pavi550/Capstone.git",
             github_repository,
         )
         return {
