@@ -27,68 +27,53 @@ or Jira, GitHub, or cloud credentials.
 ### 1. Install Git and Python
 
 Install [Git](https://git-scm.com/downloads) and
-[Python 3.11 or newer](https://www.python.org/downloads/), then open a new
-terminal. On Windows, enable the option to add Python to PATH in the installer.
-Choose the block for your terminal and paste it from the directory where
-you want a new `Capstone` folder.
+[Python 3.11 or newer](https://www.python.org/downloads/). On Windows, enable
+the option to add Python to PATH in the installer. Open a new terminal in
+the folder where you want a new `Capstone` folder.
 
-If you already have a clone, first open its root (the folder containing
-`pyproject.toml`) and run `git fetch origin`, `git switch makeitgeneric`, and
-`git pull --ff-only`. Then skip the clone and `cd Capstone` lines below. From
-`Capstone/mcp`, use `cd ..` to reach the root.
+### 2. Run the setup wizard
 
-### 2. Install dependencies and run the first test
+**Windows PowerShell or CMD**
 
-Each block creates a local `.venv`, upgrades its pip, installs the project
-and test dependencies, and runs a mocked smoke test. Expect `1 passed, 1
-deselected`. No shell activation, `.env`, API keys, or Ollama installation
-are needed for this test.
-
-**Windows PowerShell**
-
-```powershell
+```text
 git clone --branch makeitgeneric https://github.com/pavi550/Capstone.git
-if ($LASTEXITCODE -eq 0) { Set-Location Capstone }
-if (-not (Test-Path pyproject.toml)) { throw "Open the Capstone repository root." }
-python -c "import sys; sys.exit(sys.version_info < (3, 11))"
-if ($LASTEXITCODE -ne 0) { throw "Install Python 3.11 or newer." }
-python -m venv .venv
-if ($LASTEXITCODE -ne 0) { throw "Virtual environment creation failed." }
-.\.venv\Scripts\python.exe -m pip install --upgrade pip
-if ($LASTEXITCODE -ne 0) { throw "Pip upgrade failed." }
-.\.venv\Scripts\python.exe -m pip install -e ".[dev]" -r mcp/requirements.txt
-if ($LASTEXITCODE -ne 0) { throw "Dependency install failed." }
-.\.venv\Scripts\python.exe -m pytest -q tests/test_ollama_integration.py -k mocked
+cd Capstone
+.\setup_env.bat
 ```
 
-**Windows Command Prompt (CMD)**
-
-```bat
-git clone --branch makeitgeneric https://github.com/pavi550/Capstone.git && cd Capstone
-python -c "import sys; sys.exit(sys.version_info < (3, 11))" && python -m venv .venv && .\.venv\Scripts\python.exe -m pip install --upgrade pip && .\.venv\Scripts\python.exe -m pip install -e ".[dev]" -r mcp/requirements.txt && .\.venv\Scripts\python.exe -m pytest -q tests/test_ollama_integration.py -k mocked
-```
-
-**Git Bash on Windows**
+**Windows Git Bash, macOS Terminal, or Linux Bash**
 
 ```bash
-git clone --branch makeitgeneric https://github.com/pavi550/Capstone.git && cd Capstone
-python -c 'import sys; sys.exit(sys.version_info < (3, 11))' &&
-  python -m venv .venv &&
-  ./.venv/Scripts/python.exe -m pip install --upgrade pip &&
-  ./.venv/Scripts/python.exe -m pip install -e ".[dev]" -r mcp/requirements.txt &&
-  ./.venv/Scripts/python.exe -m pytest -q tests/test_ollama_integration.py -k mocked
+git clone --branch makeitgeneric https://github.com/pavi550/Capstone.git
+cd Capstone
+bash setup_env.sh
 ```
 
-**macOS Terminal (zsh) or Linux Bash**
+If you already cloned the repo, open its root (the folder with
+`pyproject.toml`), switch to `makeitgeneric`, pull the latest changes,
+and run just the setup command for your terminal.
 
-```bash
-git clone --branch makeitgeneric https://github.com/pavi550/Capstone.git && cd Capstone
-python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))' &&
-  python3 -m venv .venv &&
-  ./.venv/bin/python -m pip install --upgrade pip &&
-  ./.venv/bin/python -m pip install -e ".[dev]" -r mcp/requirements.txt &&
-  ./.venv/bin/python -m pytest -q tests/test_ollama_integration.py -k mocked
-```
+Setup creates or reuses `.venv`, upgrades its pip, installs the project
+and dependencies, and runs a credential-free smoke test. When it asks for
+a provider, press **Enter** to stop after the offline test. For a real
+provider, choose Ollama, Gemini, OpenAI, Anthropic, Groq, OpenRouter, or
+another OpenAI-compatible API. The wizard asks only for settings relevant
+to that choice and offers to configure Jira or GitHub. Jira needs a site
+URL, account email, and API token. API keys and tokens are typed at hidden
+prompts. Setup saves a private root `.env` for a configured provider and
+preserves any existing `.env`.
+
+The optional LLM check asks before sending a synthetic tool request to
+the selected provider. Hosted providers may charge for this check. It
+does not query Jira or GitHub. For Ollama, install the app, start it, and
+pull the chosen model yourself before running the check. Setup does not
+download models. To skip all prompts, pass `--smoke-only` to the setup
+command.
+
+The repo already includes `pyproject.toml` for installation and
+`mcp/config.py` for runtime settings. Pip 21.2.4 cannot handle the
+repository's editable install, which is why setup upgrades pip inside
+`.venv` before installing dependencies.
 
 For the full regression suite, paste the line for your terminal from the
 repository root. The live Ollama test skips unless you opt in.
@@ -98,13 +83,6 @@ repository root. The live Ollama test skips unless you opt in.
 | Windows PowerShell or CMD | `.\.venv\Scripts\python.exe -m pytest -q -rs` |
 | Windows Git Bash | `./.venv/Scripts/python.exe -m pytest -q -rs` |
 | macOS Terminal or Linux Bash | `./.venv/bin/python -m pytest -q -rs` |
-
-**Which files do I need?** The root `pyproject.toml` already defines packaging,
-including the `dev` dependencies. Pip 21.2.4 does not support this editable
-install. The pip upgrade in each block handles that error. Legacy
-`setup.py` and `setup.cfg` files are unnecessary. The repository already
-includes `mcp/config.py`. It reads runtime settings from the private
-`.env` you create in step 4 for a real agent run.
 
 ### 3. Run the live Ollama test
 
@@ -145,9 +123,11 @@ end-to-end latency. A skip message identifies a missing server or model.
 The live test uses Ollama at `http://127.0.0.1:11434/v1` and the same mock Jira
 tool, so it can run without real Jira or GitHub access.
 
-### 4. Configure an agent with a free or paid LLM
+### 4. Review provider and service settings
 
-From the repository root, create your private configuration once.
+The wizard can populate these settings. If you skipped provider setup and
+want to configure it manually, create your private configuration from the
+repository root.
 
 ```powershell
 Copy-Item .env.example .env

@@ -25,7 +25,13 @@ and configuring free-tier or paid hosted providers with Jira or GitHub.
 
 ## Install and configure
 
-Use Python 3.11 or newer. From the repository root, install the MCP SDK v2,
+From the repository root, use `.\setup_env.bat` in Windows PowerShell or
+CMD, or `bash setup_env.sh` in Git Bash, macOS Terminal, or Linux Bash.
+The wizard installs dependencies, runs a mocked smoke test, and offers
+to save a provider and service configuration. Use `--smoke-only` for
+an unattended setup with no credentials or live requests.
+
+For manual setup, use Python 3.11 or newer. From the repository root, install the MCP SDK v2,
 LangChain integrations, python-dotenv, and HTTP dependencies in your activated
 virtual environment.
 
