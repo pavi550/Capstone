@@ -19,6 +19,10 @@ agent against a live repository can make those changes.
 - `jira_mcp_server.py` and `github_mcp_server.py` define the REST-backed tools.
 - `run.sh` and `run.bat` dispatch through `launch.py`. Tests live in `tests/test_mcp.py`.
 
+New testers can start with the [local testing checklist](../README.md#test-the-mcp-integration-locally).
+It covers cloning, installing dependencies, running the mock and live Ollama tests,
+and configuring free-tier or paid hosted providers with Jira or GitHub.
+
 ## Install and configure
 
 Use Python 3.11 or newer. From the repository root, install the MCP SDK v2,

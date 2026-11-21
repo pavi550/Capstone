@@ -18,6 +18,95 @@ This project investigates the real impact of coding agents in enterprise softwar
 
 ---
 
+## Test the MCP integration locally
+
+Start with the mocked test. It runs the Jira orchestrator against a read-only
+MCP fixture and a mocked LLM endpoint. It needs no `.env`, Ollama installation,
+or Jira, GitHub, or cloud credentials.
+
+### 1. Clone and install
+
+With Git and Python 3.11+ installed, run these commands in PowerShell.
+
+```powershell
+git clone --branch makeitgeneric https://github.com/pavi550/Capstone.git
+cd Capstone
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]" -r mcp/requirements.txt
+```
+
+If you already cloned the repository, use `git fetch origin` and
+`git switch makeitgeneric` from your clone. In Git Bash, use
+`./.venv/Scripts/python.exe` in place of the PowerShell Python path.
+
+### 2. Run the mocked tests
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q tests/test_ollama_integration.py -k mocked
+.\.venv\Scripts\python.exe -m pytest -q -rs
+```
+
+The first command should report one pass. The full suite skips the live
+Ollama test unless you opt in.
+
+### 3. Run the live Ollama test
+
+Install [Ollama](https://ollama.com/download) and run `ollama list`. If the
+server is stopped, run `ollama serve` in a separate terminal. If the model is
+missing, download it manually with `ollama pull qwen3:8b` (about 5.2 GB).
+
+```powershell
+$env:CAPSTONE_TEST_OLLAMA = "1"
+.\.venv\Scripts\python.exe -m pytest -q -s -rs tests/test_ollama_integration.py
+Remove-Item Env:CAPSTONE_TEST_OLLAMA
+```
+
+Expect two passes and a line reporting one read-only tool call and its
+end-to-end latency. A skip message identifies a missing server or model.
+The live test uses Ollama at `http://127.0.0.1:11434/v1` and the same mock Jira
+tool, so it can run without real Jira or GitHub access.
+
+### 4. Configure an agent with a free or paid LLM
+
+From the repository root, create your private configuration once.
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Choose **one** provider to start. Edit those rows in `.env` and leave
+`LLM_FALLBACK_PROVIDERS` empty.
+
+| Option | Account setup | Settings in `.env` |
+| --- | --- | --- |
+| Ollama (local, no API billing) | Install Ollama and pull `qwen3:8b` as above | `LLM_PROVIDER=openai_compatible`, `LLM_MODEL=qwen3:8b`, `LLM_BASE_URL=http://127.0.0.1:11434/v1`, `LLM_API_KEY=ollama`, `LLM_TIMEOUT_SECONDS=180` |
+| Gemini (eligible free tier or paid) | Create a [Google AI Studio key](https://aistudio.google.com/apikey). Choose a tool-capable model available to your project and check its [tier and quota](https://ai.google.dev/gemini-api/docs/pricing). | `LLM_PROVIDER=gemini`, `LLM_MODEL=<model-id>`, `GOOGLE_API_KEY=<your-key>` |
+| OpenAI (paid API) | Set up API billing for your project and create a [project API key](https://platform.openai.com/api-keys). | `LLM_PROVIDER=openai`, `LLM_MODEL=gpt-4o-mini`, `OPENAI_API_KEY=<your-key>` |
+| Anthropic (paid API) | Add API credits or use an organization with billing, then create an [Anthropic Console key](https://console.anthropic.com/settings/keys). | `LLM_PROVIDER=anthropic`, `LLM_MODEL=claude-sonnet-4-6`, `ANTHROPIC_API_KEY=<your-key>` |
+| Other compatible hosted API | Check the provider's plan and choose an endpoint and model that support Chat Completions tool calls. | `LLM_PROVIDER=openai_compatible`, `LLM_MODEL=<model-id>`, `LLM_BASE_URL=<provider-v1-url>`, `LLM_API_KEY=<your-key>` |
+
+Next, configure the service the agent should use. A free or local LLM still
+needs service credentials to access real Jira or GitHub data.
+
+- **Jira.** Set `JIRA_BASE_URL` to your Atlassian site, `JIRA_EMAIL` to your
+  account email, and `JIRA_API_TOKEN` to your [Atlassian token](https://id.atlassian.com/manage-profile/security/api-tokens).
+  Use a test site where your account can browse project `CP`.
+- **GitHub.** Set `GITHUB_REPO` to a disposable `owner/repository`,
+  `GITHUB_BRANCH` to its base branch, and `GITHUB_TOKEN` to a
+  [token](https://github.com/settings/tokens) scoped to that repository with
+  Contents and Pull requests read/write permissions. This demo can create
+  a branch, commit, and pull request.
+
+From `mcp`, run `run.bat jira` or `run.bat github` in Windows CMD, or
+`source run.sh jira` or `source run.sh github` in Git Bash. Start with Jira
+to verify a read-only workflow. A successful run lists the open issues in
+`CP` and prints a summary. Hosted providers may receive issue or repository
+content and charge for API usage. Keep credentials in your ignored `.env`.
+See the [MCP setup and launch guide](mcp/README.md) for variable precedence,
+fallback, and troubleshooting.
+
+---
+
 ## Problem Statement
 
 Most coding-agent evaluations focus on benchmark completion rates or code-generation accuracy.
@@ -640,8 +729,8 @@ features; switch to a real LLM for that.
 ### Tests
 
 ```bash
-pip install -e . pytest ruff bandit
-pytest            # 55 tests
+python -m pip install -e ".[dev]" -r mcp/requirements.txt
+python -m pytest -q -rs
 ruff check .
 bandit -r src
 ```
