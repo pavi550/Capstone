@@ -34,7 +34,7 @@ python -m pip install -r mcp/requirements.txt
 ```
 
 Make a private root `.env` using `copy .env.example .env` in CMD or
-`cp .env.example .env` in Git Bash. Each developer configures their own clone
+`cp .env.example .env` in a macOS, Linux, or Git Bash shell. Each developer configures their own clone
 and can change providers without editing Python or the launchers. The loader
 locates this file by the source path from any working directory. A missing
 `.env` is fine if the process environment supplies the settings. File values
@@ -136,12 +136,15 @@ The adapter calls `/v1/chat/completions`. The client needs a nonempty
 placeholder key. Local Ollama ignores it. See the [Ollama compatibility
 reference](https://docs.ollama.com/api/openai-compatibility).
 
-Run `source run.sh jira openai_compatible` in Git Bash or
-`run.bat jira openai_compatible` in CMD from `mcp` to query your configured
-Jira service. For a smoke test without Jira credentials, run the following
+To query your configured Jira service from the repository root, use
+`bash mcp/run.sh jira openai_compatible` in macOS Terminal, Linux Bash,
+or Windows Git Bash. In Windows PowerShell or CMD, use
+`.\.venv\Scripts\python.exe mcp/launch.py jira openai_compatible`.
+
+For a smoke test without Jira credentials, run the following
 from the repository root after installing the MCP and test dependencies.
 
-**Git Bash**
+**macOS Terminal, Linux Bash, or Windows Git Bash**
 
 ```bash
 CAPSTONE_TEST_OLLAMA=1 python -m pytest -q -s -rs tests/test_ollama_integration.py
@@ -196,7 +199,10 @@ results.
 
 ## Launch
 
-From `Capstone/mcp` in Git Bash:
+From the repository root in macOS Terminal, Linux Bash, or Windows Git
+Bash, activate your virtual environment and run `bash mcp/run.sh jira` or
+`bash mcp/run.sh github`. From `Capstone/mcp` in Git Bash, these commands
+also work:
 
 ```bash
 source run.sh

@@ -26,9 +26,11 @@ or Jira, GitHub, or cloud credentials.
 
 ### 1. Clone and install
 
-With Git and Python 3.11+ installed, use the commands for your shell.
+With Git and Python 3.11+ installed, pick the block for your terminal.
+All commands in this checklist run from the Capstone repository root after
+cloning. If you are in `Capstone/mcp`, run `cd ..` first.
 
-**PowerShell**
+**Windows PowerShell**
 
 ```powershell
 git clone --branch makeitgeneric https://github.com/pavi550/Capstone.git
@@ -37,11 +39,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]" -r mcp/requirements.txt
 ```
 
-**macOS or Linux (zsh or Bash)**
-
-If you have already cloned Capstone, skip the first two commands and start
-at the repository root, where `pyproject.toml` is located. If your prompt is
-in `Capstone/mcp`, run `cd ..` first.
+**macOS Terminal (zsh) or Linux Bash**
 
 ```bash
 git clone --branch makeitgeneric https://github.com/pavi550/Capstone.git
@@ -62,21 +60,31 @@ source .venv/Scripts/activate
 python -m pip install -e ".[dev]" -r mcp/requirements.txt
 ```
 
-If you already cloned the repository, use `git fetch origin` and
-`git switch makeitgeneric` from your clone. Keep the virtual environment
+**Windows Command Prompt (CMD)**
+
+```bat
+git clone --branch makeitgeneric https://github.com/pavi550/Capstone.git
+cd Capstone
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]" -r mcp/requirements.txt
+```
+
+If you already cloned the repository, skip the clone and `cd Capstone`
+commands. From the repository root, run `git fetch origin` and
+`git switch makeitgeneric`. Keep the virtual environment
 active for the remaining zsh and Bash commands. If you open a new terminal,
 activate it again from the repository root.
 
 ### 2. Run the mocked tests
 
-**PowerShell**
+**Windows PowerShell or CMD**
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q tests/test_ollama_integration.py -k mocked
 .\.venv\Scripts\python.exe -m pytest -q -rs
 ```
 
-**macOS/Linux shell or Windows Git Bash**
+**macOS Terminal, Linux Bash, or Windows Git Bash**
 
 ```bash
 python -m pytest -q tests/test_ollama_integration.py -k mocked
@@ -100,7 +108,15 @@ $env:CAPSTONE_TEST_OLLAMA = "1"
 Remove-Item Env:CAPSTONE_TEST_OLLAMA
 ```
 
-**macOS/Linux shell or Windows Git Bash**
+**Windows CMD**
+
+```bat
+set "CAPSTONE_TEST_OLLAMA=1"
+.\.venv\Scripts\python.exe -m pytest -q -s -rs tests/test_ollama_integration.py
+set "CAPSTONE_TEST_OLLAMA="
+```
+
+**macOS Terminal, Linux Bash, or Windows Git Bash**
 
 ```bash
 CAPSTONE_TEST_OLLAMA=1 python -m pytest -q -s -rs tests/test_ollama_integration.py
@@ -119,7 +135,8 @@ From the repository root, create your private configuration once.
 Copy-Item .env.example .env
 ```
 
-In Bash, use `cp .env.example .env`.
+In CMD use `copy .env.example .env`. In macOS Terminal, Linux Bash, or
+Windows Git Bash use `cp .env.example .env`.
 
 Choose **one** provider to start. Edit those rows in `.env` and leave
 `LLM_FALLBACK_PROVIDERS` empty.
@@ -144,10 +161,16 @@ needs service credentials to access real Jira or GitHub data.
   Contents and Pull requests read/write permissions. This demo can create
   a branch, commit, and pull request.
 
-From `mcp`, run `run.bat jira` or `run.bat github` in Windows CMD.
-In Bash, run `cd mcp` from the repository root, then use
-`source ./run.sh jira` or `source ./run.sh github`. Start with Jira
-to verify a read-only workflow. A successful run lists the open issues in
+From the repository root, use the command for your shell. Start with Jira
+to verify a read-only workflow. Replace `jira` with `github` when you are
+ready to try the GitHub demo.
+
+| Terminal | Jira launch command |
+| --- | --- |
+| Windows PowerShell or CMD | `.\.venv\Scripts\python.exe mcp/launch.py jira` |
+| macOS Terminal, Linux Bash, or Windows Git Bash | `bash mcp/run.sh jira` |
+
+A successful run lists the open issues in
 `CP` and prints a summary. Hosted providers may receive issue or repository
 content and charge for API usage. Keep credentials in your ignored `.env`.
 See the [MCP setup and launch guide](mcp/README.md) for variable precedence,
