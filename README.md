@@ -36,6 +36,7 @@ cloning. If you are in `Capstone/mcp`, run `cd ..` first.
 git clone --branch makeitgeneric https://github.com/pavi550/Capstone.git
 cd Capstone
 python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]" -r mcp/requirements.txt
 ```
 
@@ -47,6 +48,7 @@ cd Capstone
 python3 --version  # Python 3.11 or newer
 python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade pip
 python -m pip install -e ".[dev]" -r mcp/requirements.txt
 ```
 
@@ -57,6 +59,7 @@ git clone --branch makeitgeneric https://github.com/pavi550/Capstone.git
 cd Capstone
 python -m venv .venv
 source .venv/Scripts/activate
+python -m pip install --upgrade pip
 python -m pip install -e ".[dev]" -r mcp/requirements.txt
 ```
 
@@ -66,6 +69,7 @@ python -m pip install -e ".[dev]" -r mcp/requirements.txt
 git clone --branch makeitgeneric https://github.com/pavi550/Capstone.git
 cd Capstone
 python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]" -r mcp/requirements.txt
 ```
 
@@ -74,6 +78,13 @@ commands. From the repository root, run `git fetch origin` and
 `git switch makeitgeneric`. Keep the virtual environment
 active for the remaining zsh and Bash commands. If you open a new terminal,
 activate it again from the repository root.
+
+If pip reports that `setup.py` or `setup.cfg` is missing during the editable
+install, check `python -m pip --version` using the virtual environment's
+Python. Pip 21.2.4 predates editable installs with the project's
+`pyproject.toml`. Run the pip upgrade above, then retry from the repository
+root. The project uses `pyproject.toml` for packaging and `mcp/config.py`
+for runtime settings.
 
 ### 2. Run the mocked tests
 
@@ -800,6 +811,7 @@ features; switch to a real LLM for that.
 ### Tests
 
 ```bash
+python -m pip install --upgrade pip
 python -m pip install -e ".[dev]" -r mcp/requirements.txt
 python -m pytest -q -rs
 ruff check .

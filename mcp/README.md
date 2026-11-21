@@ -256,6 +256,7 @@ network responses. The agents use asynchronous tool calling with complete model 
 tools are outside the current workflow.
 
 ```text
+python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 python -m pytest
 ```
