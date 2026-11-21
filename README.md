@@ -55,11 +55,36 @@ bash setup_env.sh
 ```
 
 If you already cloned the repo, open its root (the folder with
-`pyproject.toml`), switch to `makeitgeneric`, pull the latest changes,
-and run just the setup command for your terminal.
+`pyproject.toml`). If your terminal is in `Capstone/mcp`, run `cd ..` first.
+Then update the branch and run the setup command for your terminal.
 
-Setup creates or reuses `.venv`, upgrades its pip, installs the project
-and dependencies, and runs a credential-free smoke test. Then choose:
+```text
+git fetch origin
+git switch makeitgeneric
+git pull --ff-only origin makeitgeneric
+```
+
+#### Setup command reference
+
+Run these commands from the repository root. The wizard uses the local
+`.venv` automatically, so you can open a fresh terminal and run them as shown.
+
+| What you want to do | Windows PowerShell or CMD | Git Bash, macOS Terminal, or Linux Bash |
+| --- | --- | --- |
+| Open setup or add a service | `.\setup_env.bat` | `bash setup_env.sh` |
+| Run only the offline smoke test | `.\setup_env.bat --smoke-only` | `bash setup_env.sh --smoke-only` |
+| Reinstall dependencies, then open setup | `.\setup_env.bat --reinstall` | `bash setup_env.sh --reinstall` |
+| Reinstall dependencies and test without prompts | `.\setup_env.bat --reinstall --smoke-only` | `bash setup_env.sh --reinstall --smoke-only` |
+
+On a healthy repeat run, look for `Precheck passed: reusing .venv`.
+The installer is skipped, and the smoke test still runs. A successful
+offline test reports `1 passed, 1 deselected`.
+
+On the first run, setup creates or reuses `.venv`, upgrades pip, and
+installs the project and dependencies. Later runs skip the installation
+if the setup inputs are unchanged and `pip check` passes. Use
+`--reinstall` to force a refresh. Setup runs a credential-free smoke test
+before showing the configuration menu. Then choose:
 
 - **Finish** to stop after the offline test.
 - **Configure LLM and services** to set up a primary model and an optional
@@ -81,7 +106,26 @@ and dependencies, and runs a credential-free smoke test. Then choose:
    | --- | --- |
    | Jira | Site URL, Atlassian account email, and an API token with access to the test Jira project |
    | Confluence | Cloud site URL (with or without `/wiki`), Atlassian account email, and an API token with access to Confluence spaces |
-   | GitHub | Test repository in `owner/repository` format, base branch (default `main`), and a personal access token for that repository with Contents and Pull requests read/write permissions |
+   | GitHub | Test repository in `owner/repository` format or its HTTPS GitHub URL, base branch (default `main`), and a personal access token for that repository with Contents and Pull requests read/write permissions |
+
+For example, to try Ollama and configure all three services, choose
+**Configure LLM and services ? ollama ? Jira, Confluence, and GitHub**.
+Press **Enter** at the model prompt to accept `qwen3:8b`, then choose **none** for the backup
+if you only want to use Ollama. Replace these example inputs with your own.
+
+| Prompt | Example input |
+| --- | --- |
+| Jira site URL | `https://example.atlassian.net` |
+| Jira account email | `tester@example.com` |
+| Confluence site URL | `https://example.atlassian.net/wiki` |
+| Confluence account email | `tester@example.com` |
+| GitHub repository | `your-org/capstone-test` or `https://github.com/your-org/capstone-test.git` |
+| GitHub base branch | `main` or the name of an existing test branch |
+| Hidden token prompts | Paste the API token for that service. The terminal keeps the input hidden. |
+
+If an input is invalid, setup names the field, shows an example, and asks
+for that field again. If a setup step fails, the error names the step
+and gives a next action. The optional LLM check runs after saving `.env`.
 
 The wizard saves the selected settings in the private root `.env`.
 Adding GitHub later leaves the Jira, Confluence, and LLM settings in place.
@@ -192,21 +236,42 @@ needs service credentials to access real Jira or GitHub data.
   Contents and Pull requests read/write permissions. This demo can create
   a branch, commit, and pull request.
 
-From the repository root, use the command for your shell. Start with Jira
-to verify a read-only workflow. Replace `jira` with `github` when you are
-ready to try the GitHub demo.
+#### Run a configured service
 
-| Terminal | Jira launch command |
-| --- | --- |
-| Windows PowerShell or CMD | `.\.venv\Scripts\python.exe mcp/launch.py jira` |
-| Windows Git Bash | `./.venv/Scripts/python.exe mcp/launch.py jira` |
-| macOS Terminal or Linux Bash | `./.venv/bin/python mcp/launch.py jira` |
+From the repository root, paste only the line for your terminal and service.
+Start with Jira on a test site or the read-only Confluence check. The Jira
+and GitHub agents use the selected LLM. The Confluence check uses the
+Atlassian API only. Use a disposable repository for the GitHub command.
+It can create a branch, commit, and pull request.
 
-A successful run lists the open issues in
-`CP` and prints a summary. Hosted providers may receive issue or repository
+**Windows PowerShell or CMD**
+
+```text
+.\.venv\Scripts\python.exe mcp/launch.py jira
+.\.venv\Scripts\python.exe mcp/launch.py confluence
+.\.venv\Scripts\python.exe mcp/launch.py github
+```
+
+**Windows Git Bash**
+
+```bash
+./.venv/Scripts/python.exe mcp/launch.py jira
+./.venv/Scripts/python.exe mcp/launch.py confluence
+./.venv/Scripts/python.exe mcp/launch.py github
+```
+
+**macOS Terminal or Linux Bash**
+
+```bash
+./.venv/bin/python mcp/launch.py jira
+./.venv/bin/python mcp/launch.py confluence
+./.venv/bin/python mcp/launch.py github
+```
+
+A successful Jira run lists open issues in `CP` and prints a summary. Hosted providers may receive issue or repository
 content and charge for API usage. Keep credentials in your ignored `.env`.
 See the [MCP setup and launch guide](mcp/README.md) for variable precedence,
-fallback, and troubleshooting. The [original SKILL.md](docs/reference/capstone-multi-llm-skill/SKILL.md)
+fallback, and troubleshooting. The [original SKILL.md](SKILL.md)
 is included for reference. Its paths and setup instructions describe the
 original reference bundle. Use this README for the current checkout.
 

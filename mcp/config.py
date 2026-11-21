@@ -71,24 +71,40 @@ def jira_settings(values):
     return endpoint(url, "JIRA_BASE_URL"), email, token
 
 
-def github_settings(values):
-    token, = required(values, "GITHUB_TOKEN")
-    owner = values.get("GITHUB_OWNER", "pavi550").strip()
-    repo = values.get("GITHUB_REPO", "Capstone").strip()
-    branch = values.get("GITHUB_BRANCH", "main").strip()
-    if "/" in repo:
+def github_repository(repo, owner=""):
+    repo = repo.strip()
+    url = re.fullmatch(r"https://github\.com/([^/]+)/([^/]+)/?", repo, re.IGNORECASE)
+    if url:
+        owner, repo = url.groups()
+        repo = repo.removesuffix(".git")
+    elif "/" in repo:
         owner, _, repo = repo.partition("/")
     if not all(re.fullmatch(r"[A-Za-z0-9_.-]+", part) and part not in {".", ".."}
-               for part in (owner, repo)) or not branch:
-        raise ConfigurationError("Check GITHUB_OWNER, GITHUB_REPO and GITHUB_BRANCH.")
+               for part in (owner, repo)):
+        raise ConfigurationError("Use owner/repository or an HTTPS github.com repository URL.")
+    return owner, repo
+
+
+def github_settings(values):
+    token, = required(values, "GITHUB_TOKEN")
+    owner, repo = github_repository(
+        values.get("GITHUB_REPO", "Capstone"), values.get("GITHUB_OWNER", "pavi550").strip(),
+    )
+    branch = values.get("GITHUB_BRANCH", "main").strip()
+    if not branch:
+        raise ConfigurationError("GITHUB_BRANCH must name a base branch.")
     return token, owner, repo, branch
+
+
+def confluence_url(value):
+    url = endpoint(value, "CONFLUENCE_BASE_URL")
+    if urlsplit(url).path not in {"", "/wiki"}:
+        raise ConfigurationError("CONFLUENCE_BASE_URL must be a Confluence Cloud site URL or end in /wiki.")
+    return url if url.endswith("/wiki") else f"{url}/wiki"
 
 
 def confluence_settings(values):
     url, email, token = required(
         values, "CONFLUENCE_BASE_URL", "CONFLUENCE_EMAIL", "CONFLUENCE_API_TOKEN",
     )
-    url = endpoint(url, "CONFLUENCE_BASE_URL")
-    if urlsplit(url).path not in {"", "/wiki"}:
-        raise ConfigurationError("CONFLUENCE_BASE_URL must be a Confluence Cloud site URL or end in /wiki.")
-    return url if url.endswith("/wiki") else f"{url}/wiki", email, token
+    return confluence_url(url), email, token

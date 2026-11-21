@@ -27,7 +27,9 @@ and configuring free-tier or paid hosted providers with Jira or GitHub.
 
 From the repository root, use `.\setup_env.bat` in Windows PowerShell or
 CMD, or `bash setup_env.sh` in Git Bash, macOS Terminal, or Linux Bash.
-The wizard installs dependencies, runs a mocked smoke test, and offers
+The wizard installs dependencies on the first run. On later runs, the
+precheck skips installation when inputs match and dependencies are healthy.
+Use `--reinstall` to force a refresh. The wizard runs a mocked smoke test and offers
 to save a primary model, an optional backup, and service configuration.
 The services menu is available even when you already have a root `.env`.
 Choose **Jira and Confluence** or **Jira, Confluence, and GitHub** to configure
@@ -64,7 +66,8 @@ variables override same-named file values, including empty values.
 Use a Jira token issued for the configured email. The GitHub demo needs
 Contents and Pull requests read/write permissions for the target repository.
 GitHub defaults to `pavi550/Capstone`, branch `main`. `GITHUB_REPO` also accepts
-`owner/repository`, which takes precedence over `GITHUB_OWNER`.
+`owner/repository` or the full HTTPS GitHub repository URL, including a clone
+URL ending in `.git`. Both forms take precedence over `GITHUB_OWNER`.
 
 ## Select a model
 
@@ -230,6 +233,10 @@ fallback allows the listed providers to receive the conversation and MCP tool
 results.
 
 ## Launch
+
+For copy-paste setup flags and launch commands by terminal, see the root
+README's [setup command reference](../README.md#setup-command-reference)
+and [service launch commands](../README.md#run-a-configured-service).
 
 From the repository root in macOS Terminal, Linux Bash, or Windows Git
 Bash, activate your virtual environment and run `bash mcp/run.sh jira` or

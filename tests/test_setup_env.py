@@ -1,9 +1,10 @@
 import asyncio
+import subprocess
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from config import settings
+from config import ConfigurationError, github_settings, settings
 from langchain_core.messages import AIMessage, ToolMessage
 from llm_provider import create_llm
 from setup_health import TOOL_NAME, check_provider
@@ -75,12 +76,14 @@ def test_optional_check_returns_mock_tool_result(monkeypatch, capsys):
     assert "LLM test passed" in capsys.readouterr().out
 
 
-def test_existing_config_can_add_all_services_without_replacing_model(monkeypatch, private_env):
+def test_existing_config_can_add_all_services_without_replacing_model(monkeypatch, private_env, capsys):
     private_env.write_text("# Keep this comment\nLLM_PROVIDER=openai\n", encoding="utf-8")
     answers = iter([
-        "configure services only", "jira, confluence, and github", "https://jira.example.test",
-        "jira@example.test", "https://wiki.example.test/wiki", "wiki@example.test",
-        "test-owner/test-repo", "develop",
+        "configure services only", "jira, confluence, and github",
+        "http://jira.example.test", "https://jira.example.test", "wrong-email", "jira@example.test",
+        "https://wiki.example.test/wiki/spaces", "https://wiki.example.test/wiki", "wiki@example.test",
+        "https://example.test/test-owner/test-repo",
+        "https://github.com/test-owner/test-repo.git", "develop",
     ])
     monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
     monkeypatch.setattr(setup_env.getpass, "getpass", lambda _prompt: "fixture-token")
@@ -93,6 +96,12 @@ def test_existing_config_can_add_all_services_without_replacing_model(monkeypatc
     assert values["GITHUB_BRANCH"] == "develop"
     assert values["GITHUB_TOKEN"] == "fixture-token"
     assert "# Keep this comment" in private_env.read_text(encoding="utf-8-sig")
+    output = capsys.readouterr().out
+    assert "Jira site URL:" in output and "Example: https://example.atlassian.net." in output
+    assert "Jira account email:" in output and "Example: tester@example.com." in output
+    assert "Confluence site URL:" in output and "Example: https://example.atlassian.net/wiki." in output
+    assert "GitHub repository:" in output and "https://github.com/your-org/capstone-test.git" in output
+    assert "fixture-token" not in output
 
 
 def test_setup_builds_openai_to_ollama_fallback(monkeypatch):
@@ -124,3 +133,71 @@ def test_read_only_confluence_check(monkeypatch, capsys):
     })
     confluence_check.check()
     assert "read-only API check passed" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("repository", [
+    "pavi550/Capstone", "https://github.com/pavi550/Capstone/",
+    "https://github.com/pavi550/Capstone.git",
+])
+def test_github_settings_accepts_repository_urls(repository):
+    assert github_settings({"GITHUB_REPO": repository, "GITHUB_TOKEN": "fixture"}) == (
+        "fixture", "pavi550", "Capstone", "main",
+    )
+
+
+@pytest.mark.parametrize("repository", [
+    "https://github.com.example.test/owner/repo",
+    "https://github.com/owner/repo/tree/main",
+    "https://secret@github.com/owner/repo",
+    "https://github.com/owner/repo?token=secret",
+])
+def test_github_settings_rejects_non_repository_urls(repository):
+    with pytest.raises(ConfigurationError, match="HTTPS github.com repository URL") as error:
+        github_settings({"GITHUB_REPO": repository, "GITHUB_TOKEN": "fixture"})
+    assert "secret" not in str(error.value)
+
+
+def test_smoke_test_failure_names_failed_stage(monkeypatch, capsys):
+    monkeypatch.setattr("sys.argv", ["setup_env.py", "--smoke-only"])
+    monkeypatch.setattr(setup_env, "install", lambda **_: "fixture-python")
+
+    def fail(*_args):
+        raise subprocess.CalledProcessError(1, ["pytest"])
+
+    monkeypatch.setattr(setup_env, "run_python", fail)
+    assert setup_env.main() == 1
+    error = capsys.readouterr().err
+    assert "Setup failed at offline smoke test." in error
+    assert "uses no service credentials" in error
+
+
+def test_install_reuses_environment_when_inputs_and_dependencies_match(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(setup_env, "ROOT", tmp_path)
+    monkeypatch.setattr(setup_env, "install_fingerprint", lambda: "fixture-fingerprint")
+    venv = tmp_path / ".venv"
+    python = venv / ("Scripts/python.exe" if setup_env.os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True)
+    python.touch()
+    (venv / ".capstone-dependencies").write_bytes(b"fixture-fingerprint")
+    calls = []
+
+    def record(_python, *args, **_kwargs):
+        calls.append(args)
+
+    monkeypatch.setattr(setup_env, "run_python", record)
+    assert setup_env.install() == python
+    assert len(calls) == 2
+    assert calls[1] == ("-m", "pip", "check")
+    assert "Dependency installation skipped" in capsys.readouterr().out
+
+
+def test_precheck_rejects_changed_or_broken_dependencies(monkeypatch, tmp_path):
+    stamp = tmp_path / "stamp"
+    stamp.write_bytes(b"old-fingerprint")
+
+    def broken(*_args, **_kwargs):
+        raise subprocess.CalledProcessError(1, ["pip", "check"])
+
+    monkeypatch.setattr(setup_env, "run_python", broken)
+    assert not setup_env.dependencies_ready("fixture-python", stamp, "new-fingerprint")
+    assert not setup_env.dependencies_ready("fixture-python", stamp, "old-fingerprint")

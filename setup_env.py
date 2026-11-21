@@ -3,13 +3,16 @@
 import argparse
 import asyncio
 import getpass
+import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import venv
 import warnings
+from contextlib import contextmanager
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -26,12 +29,53 @@ PROVIDERS = {
 }
 
 
-def run_python(python, *args):
+def run_python(python, *args, quiet=False):
     env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
-    subprocess.run([str(python), *args], cwd=ROOT, env=env, check=True)
+    subprocess.run([str(python), *args], cwd=ROOT, env=env, check=True, capture_output=quiet)
 
 
-def install():
+class SetupStepError(RuntimeError):
+    """A setup failure with a specific user-facing stage."""
+
+
+@contextmanager
+def step(name, hint=""):
+    try:
+        yield
+    except SetupStepError:
+        raise
+    except (OSError, RuntimeError, subprocess.CalledProcessError) as exc:
+        details = str(exc) if isinstance(exc, RuntimeError) else ""
+        message = " ".join(part for part in (f"Setup failed at {name}.", details, hint) if part)
+        raise SetupStepError(message) from None
+
+
+def install_fingerprint():
+    digest = hashlib.sha256()
+    paths = [ROOT / "pyproject.toml", ROOT / "mcp" / "requirements.txt"]
+    paths.extend(sorted(
+        path for path in (ROOT / "src" / "agentic_sdlc").rglob("*")
+        if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc"
+    ))
+    for path in paths:
+        content = path.read_bytes()
+        digest.update(path.relative_to(ROOT).as_posix().encode())
+        digest.update(b"\0")
+        digest.update(hashlib.sha256(content).digest())
+    return digest.hexdigest()
+
+
+def dependencies_ready(python, stamp, fingerprint):
+    if not stamp.is_file() or stamp.read_bytes() != fingerprint.encode("ascii"):
+        return False
+    try:
+        run_python(python, "-m", "pip", "check", quiet=True)
+    except (OSError, subprocess.CalledProcessError):
+        return False
+    return True
+
+
+def install(*, reinstall=False):
     local_venv = ROOT / ".venv"
     relative_python = "Scripts/python.exe" if os.name == "nt" else "bin/python"
     python = local_venv / relative_python
@@ -52,8 +96,15 @@ def install():
         run_python(python, "-c", "import sys; sys.exit(sys.version_info < (3, 11))")
     except (OSError, subprocess.CalledProcessError):
         raise RuntimeError("The existing .venv needs Python 3.11+. Rename it and rerun setup.") from None
+    stamp = local_venv / ".capstone-dependencies"
+    fingerprint = install_fingerprint()
+    if not reinstall and dependencies_ready(python, stamp, fingerprint):
+        print("Precheck passed: reusing .venv. Dependency installation skipped.", flush=True)
+        return python
+    stamp.unlink(missing_ok=True)
     print("Installing Capstone and test dependencies...", flush=True)
-    run_python(python, "-m", "pip", "install", "--upgrade", "pip")
+    with step("pip upgrade", "Check your internet connection and access to your Python package index."):
+        run_python(python, "-m", "pip", "install", "--upgrade", "pip")
     # Build from a temporary copy so setuptools can generate metadata outside the checkout.
     with tempfile.TemporaryDirectory(prefix="capstone-setup-") as directory:
         source = Path(directory)
@@ -63,9 +114,16 @@ def install():
             ROOT / "src", source / "src",
             ignore=shutil.ignore_patterns("*.egg-info", "__pycache__"),
         )
-        run_python(
-            python, "-m", "pip", "install", f"{source}[dev]", "-r", "mcp/requirements.txt",
-        )
+        with step("dependency installation",
+                  "Check the pip output above. Use Python 3.11+ and a reachable package index."):
+            flags = ["--force-reinstall"] if reinstall else []
+            run_python(
+                python, "-m", "pip", "install", *flags, f"{source}[dev]", "-r",
+                "mcp/requirements.txt",
+            )
+    with step("dependency precheck", "Review the pip check output and rerun setup with --reinstall."):
+        run_python(python, "-m", "pip", "check")
+        stamp.write_bytes(fingerprint.encode("ascii"))
     return python
 
 
@@ -81,7 +139,8 @@ def ask(label, default="", *, secret=False):
         answer = answer.strip() or default
         if answer:
             return answer
-        print("Please enter a value.")
+        print(f"{label} is required. Paste the token from the provider settings page." if secret
+              else f"{label} is required.")
 
 
 def choice(label, options, default):
@@ -122,6 +181,25 @@ def write_env(values):
         os.replace(updated, ENV_PATH)
 
 
+def validated_answer(field, example, validate):
+    from config import ConfigurationError
+
+    while True:
+        answer = ask(f"{field} (e.g. {example})")
+        try:
+            return validate(answer)
+        except ConfigurationError as exc:
+            print(f"{field}: {exc} Example: {example}.")
+
+
+def email_address(value):
+    from config import ConfigurationError
+
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+", value):
+        raise ConfigurationError("Enter the email address for your account.")
+    return value
+
+
 def provider_settings(selected):
     from config import endpoint
 
@@ -129,49 +207,58 @@ def provider_settings(selected):
     print("Use a model that supports tool calling and is enabled for your account.")
     values = {
         "LLM_PROVIDER": provider,
-        "LLM_MODEL": ask("Model ID", model),
+        "LLM_MODEL": ask("Model ID from your provider (e.g. qwen3:8b for Ollama)", model),
         "LLM_TIMEOUT_SECONDS": "180" if selected == "ollama" else "120",
         "LLM_FALLBACK_PROVIDERS": "",
     }
     if provider == "openai_compatible":
-        url = default_url or ask("Provider base URL (including its API prefix)")
-        values["LLM_BASE_URL"] = endpoint(url, "LLM_BASE_URL", allow_loopback=True)
+        values["LLM_BASE_URL"] = default_url or validated_answer(
+            "Provider base URL", "https://api.example.com/v1",
+            lambda url: endpoint(url, "LLM_BASE_URL", allow_loopback=True),
+        )
     values[key_var] = "ollama" if selected == "ollama" else ask("Provider API key", secret=True)
     return values
 
 
 def service_settings(selected):
-    from config import confluence_settings, github_settings, jira_settings
+    from config import confluence_url, endpoint, github_repository
 
     if selected == "jira":
         print("Use an account that can browse project CP. The wizard will not query Jira.")
-        values = {
-            "JIRA_BASE_URL": ask("Jira site URL (https://your-domain.atlassian.net)"),
-            "JIRA_EMAIL": ask("Jira account email"),
+        print("Create an Atlassian API token at https://id.atlassian.com/manage-profile/security/api-tokens.")
+        return {
+            "JIRA_BASE_URL": validated_answer(
+                "Jira site URL", "https://example.atlassian.net",
+                lambda url: endpoint(url, "JIRA_BASE_URL"),
+            ),
+            "JIRA_EMAIL": validated_answer("Jira account email", "tester@example.com", email_address),
             "JIRA_API_TOKEN": ask("Jira API token", secret=True),
         }
-        jira_settings(values)
-        return values
     if selected == "confluence":
         print("Confluence setup enables a read-only Cloud connection check.")
-        values = {
-            "CONFLUENCE_BASE_URL": ask("Confluence site URL (https://your-domain.atlassian.net/wiki)"),
-            "CONFLUENCE_EMAIL": ask("Confluence account email"),
+        print("Use an Atlassian API token from https://id.atlassian.com/manage-profile/security/api-tokens.")
+        return {
+            "CONFLUENCE_BASE_URL": validated_answer(
+                "Confluence site URL", "https://example.atlassian.net/wiki", confluence_url,
+            ),
+            "CONFLUENCE_EMAIL": validated_answer(
+                "Confluence account email", "tester@example.com", email_address,
+            ),
             "CONFLUENCE_API_TOKEN": ask("Confluence API token", secret=True),
         }
-        confluence_settings(values)
-        return values
     if selected == "github":
         print("Use a test repo. The GitHub agent can create branches, commits, and pull requests.")
         print("Create a GitHub personal access token at https://github.com/settings/tokens.")
         print("Grant Contents and Pull requests read/write access for the selected repository.")
-        values = {
-            "GITHUB_REPO": ask("Test GitHub repository (owner/repository)"),
-            "GITHUB_BRANCH": ask("Base branch", "main"),
+        owner, repo = validated_answer(
+            "GitHub repository", "your-org/capstone-test or https://github.com/your-org/capstone-test.git",
+            github_repository,
+        )
+        return {
+            "GITHUB_REPO": f"{owner}/{repo}",
+            "GITHUB_BRANCH": ask("Base branch (e.g. main or makeitgeneric)", "main"),
             "GITHUB_TOKEN": ask("GitHub personal access token", secret=True),
         }
-        github_settings(values)
-        return values
     return {}
 
 
@@ -220,7 +307,8 @@ def configure():
         return
     if action == "test configured llm":
         if ask("Send mock data to the selected provider now? Hosted APIs may charge (y/N)", "n").lower() == "y":
-            check_llm(settings())
+            with step("LLM connection check", "For Ollama, run ollama list and check the model ID, e.g. qwen3:8b."):
+                check_llm(settings())
         return
 
     values = {}
@@ -243,7 +331,8 @@ def configure():
         values.update(service_settings(name))
     if not values:
         return
-    write_env(values)
+    with step("saving .env", "Check that the repository root and .env are writable."):
+        write_env(values)
     print("Saved the selected settings in the private .env.")
     python = r".\.venv\Scripts\python.exe" if os.name == "nt" else "./.venv/bin/python"
     for name in services:
@@ -253,7 +342,8 @@ def configure():
     if selected == "ollama":
         print("Start Ollama and run 'ollama list'. If needed, install the model with 'ollama pull'.")
     if selected and ask("Test the primary LLM with mock data? Hosted APIs may charge (y/N)", "n").lower() == "y":
-        check_llm(settings())
+        with step("LLM connection check", "For Ollama, run ollama list and check the model ID, e.g. qwen3:8b."):
+            check_llm(settings())
 
 
 def check_llm(values):
@@ -297,22 +387,25 @@ def main():
         return 1
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--smoke-only", action="store_true", help="Install and test without prompts.")
+    parser.add_argument("--reinstall", action="store_true", help="Reinstall dependencies even if precheck passes.")
     parser.add_argument("--configure", action="store_true", help=argparse.SUPPRESS)
     options = parser.parse_args()
     try:
         if options.configure:
             configure()
         else:
-            python = install()
+            with step("Python environment setup", "Check permissions and the Python installation."):
+                python = install(reinstall=options.reinstall)
             print("Running the smoke test with a mock Jira server and mocked LLM...", flush=True)
-            run_python(python, "-m", "pytest", "-q", "tests/test_ollama_integration.py", "-k", "mocked")
+            with step("offline smoke test", "Review the pytest failure above. This test uses no service credentials."):
+                run_python(python, "-m", "pytest", "-q", "tests/test_ollama_integration.py", "-k", "mocked")
             if not options.smoke_only:
-                run_python(python, str(Path(__file__).resolve()), "--configure")
+                try:
+                    run_python(python, str(Path(__file__).resolve()), "--configure")
+                except subprocess.CalledProcessError as exc:
+                    return exc.returncode
     except (KeyboardInterrupt, EOFError, getpass.GetPassWarning):
         print("Setup stopped. For hidden credential input, run setup in an interactive terminal.")
-        return 1
-    except subprocess.CalledProcessError:
-        print("Setup stopped because the previous step failed.", file=sys.stderr)
         return 1
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
