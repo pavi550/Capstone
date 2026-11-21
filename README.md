@@ -37,23 +37,35 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]" -r mcp/requirements.txt
 ```
 
-**Bash**
+**macOS or Linux (zsh or Bash)**
+
+If you have already cloned Capstone, skip the first two commands and start
+at the repository root, where `pyproject.toml` is located. If your prompt is
+in `Capstone/mcp`, run `cd ..` first.
+
+```bash
+git clone --branch makeitgeneric https://github.com/pavi550/Capstone.git
+cd Capstone
+python3 --version  # Python 3.11 or newer
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev]" -r mcp/requirements.txt
+```
+
+**Git Bash on Windows**
 
 ```bash
 git clone --branch makeitgeneric https://github.com/pavi550/Capstone.git
 cd Capstone
 python -m venv .venv
-source .venv/Scripts/activate  # Git Bash on Windows
+source .venv/Scripts/activate
 python -m pip install -e ".[dev]" -r mcp/requirements.txt
 ```
 
-On Linux or macOS, use `python3 -m venv .venv` and
-`source .venv/bin/activate` in the setup block. Run the remaining Bash
-commands with the virtual environment active. If you open a new terminal,
-activate it again from the repository root.
-
 If you already cloned the repository, use `git fetch origin` and
-`git switch makeitgeneric` from your clone.
+`git switch makeitgeneric` from your clone. Keep the virtual environment
+active for the remaining zsh and Bash commands. If you open a new terminal,
+activate it again from the repository root.
 
 ### 2. Run the mocked tests
 
@@ -64,7 +76,7 @@ If you already cloned the repository, use `git fetch origin` and
 .\.venv\Scripts\python.exe -m pytest -q -rs
 ```
 
-**Bash**
+**macOS/Linux shell or Windows Git Bash**
 
 ```bash
 python -m pytest -q tests/test_ollama_integration.py -k mocked
@@ -88,7 +100,7 @@ $env:CAPSTONE_TEST_OLLAMA = "1"
 Remove-Item Env:CAPSTONE_TEST_OLLAMA
 ```
 
-**Bash**
+**macOS/Linux shell or Windows Git Bash**
 
 ```bash
 CAPSTONE_TEST_OLLAMA=1 python -m pytest -q -s -rs tests/test_ollama_integration.py
