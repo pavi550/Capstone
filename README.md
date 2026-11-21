@@ -24,86 +24,87 @@ Start with the mocked test. It runs the Jira orchestrator against a read-only
 MCP fixture and a mocked LLM endpoint. It needs no `.env`, Ollama installation,
 or Jira, GitHub, or cloud credentials.
 
-### 1. Clone and install
+### 1. Install Git and Python
 
-With Git and Python 3.11+ installed, pick the block for your terminal.
-All commands in this checklist run from the Capstone repository root after
-cloning. If you are in `Capstone/mcp`, run `cd ..` first.
+Install [Git](https://git-scm.com/downloads) and
+[Python 3.11 or newer](https://www.python.org/downloads/), then open a new
+terminal. On Windows, enable the option to add Python to PATH in the installer.
+Choose the block for your terminal and paste it from the directory where
+you want a new `Capstone` folder.
+
+If you already have a clone, first open its root (the folder containing
+`pyproject.toml`) and run `git fetch origin`, `git switch makeitgeneric`, and
+`git pull --ff-only`. Then skip the clone and `cd Capstone` lines below. From
+`Capstone/mcp`, use `cd ..` to reach the root.
+
+### 2. Install dependencies and run the first test
+
+Each block creates a local `.venv`, upgrades its pip, installs the project
+and test dependencies, and runs a mocked smoke test. Expect `1 passed, 1
+deselected`. No shell activation, `.env`, API keys, or Ollama installation
+are needed for this test.
 
 **Windows PowerShell**
 
 ```powershell
 git clone --branch makeitgeneric https://github.com/pavi550/Capstone.git
-cd Capstone
+if ($LASTEXITCODE -eq 0) { Set-Location Capstone }
+if (-not (Test-Path pyproject.toml)) { throw "Open the Capstone repository root." }
+python -c "import sys; sys.exit(sys.version_info < (3, 11))"
+if ($LASTEXITCODE -ne 0) { throw "Install Python 3.11 or newer." }
 python -m venv .venv
+if ($LASTEXITCODE -ne 0) { throw "Virtual environment creation failed." }
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
+if ($LASTEXITCODE -ne 0) { throw "Pip upgrade failed." }
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]" -r mcp/requirements.txt
-```
-
-**macOS Terminal (zsh) or Linux Bash**
-
-```bash
-git clone --branch makeitgeneric https://github.com/pavi550/Capstone.git
-cd Capstone
-python3 --version  # Python 3.11 or newer
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev]" -r mcp/requirements.txt
-```
-
-**Git Bash on Windows**
-
-```bash
-git clone --branch makeitgeneric https://github.com/pavi550/Capstone.git
-cd Capstone
-python -m venv .venv
-source .venv/Scripts/activate
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev]" -r mcp/requirements.txt
+if ($LASTEXITCODE -ne 0) { throw "Dependency install failed." }
+.\.venv\Scripts\python.exe -m pytest -q tests/test_ollama_integration.py -k mocked
 ```
 
 **Windows Command Prompt (CMD)**
 
 ```bat
-git clone --branch makeitgeneric https://github.com/pavi550/Capstone.git
-cd Capstone
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install -e ".[dev]" -r mcp/requirements.txt
+git clone --branch makeitgeneric https://github.com/pavi550/Capstone.git && cd Capstone
+python -c "import sys; sys.exit(sys.version_info < (3, 11))" && python -m venv .venv && .\.venv\Scripts\python.exe -m pip install --upgrade pip && .\.venv\Scripts\python.exe -m pip install -e ".[dev]" -r mcp/requirements.txt && .\.venv\Scripts\python.exe -m pytest -q tests/test_ollama_integration.py -k mocked
 ```
 
-If you already cloned the repository, skip the clone and `cd Capstone`
-commands. From the repository root, run `git fetch origin` and
-`git switch makeitgeneric`. Keep the virtual environment
-active for the remaining zsh and Bash commands. If you open a new terminal,
-activate it again from the repository root.
-
-If pip reports that `setup.py` or `setup.cfg` is missing during the editable
-install, check `python -m pip --version` using the virtual environment's
-Python. Pip 21.2.4 predates editable installs with the project's
-`pyproject.toml`. Run the pip upgrade above, then retry from the repository
-root. The project uses `pyproject.toml` for packaging and `mcp/config.py`
-for runtime settings.
-
-### 2. Run the mocked tests
-
-**Windows PowerShell or CMD**
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest -q tests/test_ollama_integration.py -k mocked
-.\.venv\Scripts\python.exe -m pytest -q -rs
-```
-
-**macOS Terminal, Linux Bash, or Windows Git Bash**
+**Git Bash on Windows**
 
 ```bash
-python -m pytest -q tests/test_ollama_integration.py -k mocked
-python -m pytest -q -rs
+git clone --branch makeitgeneric https://github.com/pavi550/Capstone.git && cd Capstone
+python -c 'import sys; sys.exit(sys.version_info < (3, 11))' &&
+  python -m venv .venv &&
+  ./.venv/Scripts/python.exe -m pip install --upgrade pip &&
+  ./.venv/Scripts/python.exe -m pip install -e ".[dev]" -r mcp/requirements.txt &&
+  ./.venv/Scripts/python.exe -m pytest -q tests/test_ollama_integration.py -k mocked
 ```
 
-The first command should report one pass. The full suite skips the live
-Ollama test unless you opt in.
+**macOS Terminal (zsh) or Linux Bash**
+
+```bash
+git clone --branch makeitgeneric https://github.com/pavi550/Capstone.git && cd Capstone
+python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))' &&
+  python3 -m venv .venv &&
+  ./.venv/bin/python -m pip install --upgrade pip &&
+  ./.venv/bin/python -m pip install -e ".[dev]" -r mcp/requirements.txt &&
+  ./.venv/bin/python -m pytest -q tests/test_ollama_integration.py -k mocked
+```
+
+For the full regression suite, paste the line for your terminal from the
+repository root. The live Ollama test skips unless you opt in.
+
+| Terminal | Full test suite |
+| --- | --- |
+| Windows PowerShell or CMD | `.\.venv\Scripts\python.exe -m pytest -q -rs` |
+| Windows Git Bash | `./.venv/Scripts/python.exe -m pytest -q -rs` |
+| macOS Terminal or Linux Bash | `./.venv/bin/python -m pytest -q -rs` |
+
+**Which files do I need?** The root `pyproject.toml` already defines packaging,
+including the `dev` dependencies. Pip 21.2.4 does not support this editable
+install. The pip upgrade in each block handles that error. Legacy
+`setup.py` and `setup.cfg` files are unnecessary. The repository already
+includes `mcp/config.py`. It reads runtime settings from the private
+`.env` you create in step 4 for a real agent run.
 
 ### 3. Run the live Ollama test
 
@@ -127,10 +128,16 @@ set "CAPSTONE_TEST_OLLAMA=1"
 set "CAPSTONE_TEST_OLLAMA="
 ```
 
-**macOS Terminal, Linux Bash, or Windows Git Bash**
+**Git Bash on Windows**
 
 ```bash
-CAPSTONE_TEST_OLLAMA=1 python -m pytest -q -s -rs tests/test_ollama_integration.py
+CAPSTONE_TEST_OLLAMA=1 ./.venv/Scripts/python.exe -m pytest -q -s -rs tests/test_ollama_integration.py
+```
+
+**macOS Terminal or Linux Bash**
+
+```bash
+CAPSTONE_TEST_OLLAMA=1 ./.venv/bin/python -m pytest -q -s -rs tests/test_ollama_integration.py
 ```
 
 Expect two passes and a line reporting one read-only tool call and its
@@ -179,7 +186,8 @@ ready to try the GitHub demo.
 | Terminal | Jira launch command |
 | --- | --- |
 | Windows PowerShell or CMD | `.\.venv\Scripts\python.exe mcp/launch.py jira` |
-| macOS Terminal, Linux Bash, or Windows Git Bash | `bash mcp/run.sh jira` |
+| Windows Git Bash | `./.venv/Scripts/python.exe mcp/launch.py jira` |
+| macOS Terminal or Linux Bash | `./.venv/bin/python mcp/launch.py jira` |
 
 A successful run lists the open issues in
 `CP` and prints a summary. Hosted providers may receive issue or repository
