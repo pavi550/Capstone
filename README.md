@@ -18,6 +18,265 @@ This project investigates the real impact of coding agents in enterprise softwar
 
 ---
 
+## Test the MCP integration locally
+
+Start with the mocked test. It runs the Jira orchestrator against a read-only
+MCP fixture and a mocked LLM endpoint. It needs no `.env`, Ollama installation,
+or Jira, GitHub, or cloud credentials.
+
+### 1. Install Git and Python
+
+Install [Git](https://git-scm.com/downloads) and
+[Python 3.11 or newer](https://www.python.org/downloads/). On Windows, enable
+the option to add Python to PATH in the installer. Open a new terminal in
+the folder where you want a new `Capstone` folder. Run `python --version`
+on Windows or `python3 --version` on macOS/Linux to confirm the interpreter.
+On Debian or Ubuntu, install the matching `venv` package with
+`sudo apt install python3-venv` if virtual environment creation fails.
+The setup wrappers print installation instructions if Python is missing
+or too old.
+
+### 2. Run the setup wizard
+
+**Windows PowerShell or CMD**
+
+```text
+git clone --branch makeitgeneric https://github.com/pavi550/Capstone.git
+cd Capstone
+.\setup_env.bat
+```
+
+**Windows Git Bash, macOS Terminal, or Linux Bash**
+
+```bash
+git clone --branch makeitgeneric https://github.com/pavi550/Capstone.git
+cd Capstone
+bash setup_env.sh
+```
+
+If you already cloned the repo, open its root (the folder with
+`pyproject.toml`). If your terminal is in `Capstone/mcp`, run `cd ..` first.
+Then update the branch and run the setup command for your terminal.
+
+```text
+git fetch origin
+git switch makeitgeneric
+git pull --ff-only origin makeitgeneric
+```
+
+#### Setup command reference
+
+Run these commands from the repository root. The wizard uses the local
+`.venv` automatically, so you can open a fresh terminal and run them as shown.
+
+| What you want to do | Windows PowerShell or CMD | Git Bash, macOS Terminal, or Linux Bash |
+| --- | --- | --- |
+| Open setup or add a service | `.\setup_env.bat` | `bash setup_env.sh` |
+| Run only the offline smoke test | `.\setup_env.bat --smoke-only` | `bash setup_env.sh --smoke-only` |
+| Reinstall dependencies, then open setup | `.\setup_env.bat --reinstall` | `bash setup_env.sh --reinstall` |
+| Reinstall dependencies and test without prompts | `.\setup_env.bat --reinstall --smoke-only` | `bash setup_env.sh --reinstall --smoke-only` |
+
+On a healthy repeat run, look for `Precheck passed: reusing .venv`.
+The installer is skipped, and the smoke test still runs. A successful
+offline test reports `1 passed, 1 deselected`.
+
+On the first run, setup creates or reuses `.venv`, upgrades pip, and
+installs the project and dependencies. Later runs skip the installation
+if the setup inputs are unchanged and `pip check` passes. Use
+`--reinstall` to force a refresh. Setup runs a credential-free smoke test
+before showing the configuration menu. Then choose:
+
+- **Finish** to stop after the offline test.
+- **Configure LLM and services** to set up a primary model and an optional
+  backup. For example, select OpenAI first and Ollama as the backup.
+- **Configure services only** to set up Jira, Confluence, both Jira and
+  Confluence, GitHub, or all three without changing the LLM.
+- **Test configured LLM** to check the primary model already set in `.env`.
+
+#### Set up all three services or add one later
+
+1. Run the setup command for your terminal from the Capstone root.
+2. On a fresh clone, choose **Configure LLM and services** and select your
+   primary model. If the LLM is already configured, choose **Configure services only**.
+3. Choose **Jira, Confluence, and GitHub** to enter all three in one run.
+   If you are adding one later, choose just that service.
+4. Have these details ready. Paste tokens only at the hidden prompts.
+
+   | Service | What to enter |
+   | --- | --- |
+   | Jira | Site URL, Atlassian account email, and an API token with access to the test Jira project |
+   | Confluence | Cloud site URL (with or without `/wiki`), Atlassian account email, and an API token with access to Confluence spaces |
+   | GitHub | Test repository in `owner/repository` format or its HTTPS GitHub URL, base branch (default `main`), and a personal access token for that repository with Contents and Pull requests read/write permissions |
+
+For example, to try Ollama and configure all three services, choose
+**Configure LLM and services ? ollama ? Jira, Confluence, and GitHub**.
+Press **Enter** at the model prompt to accept `qwen3:8b`, then choose **none** for the backup
+if you only want to use Ollama. Replace these example inputs with your own.
+
+| Prompt | Example input |
+| --- | --- |
+| Jira site URL | `https://capstoneprojectgrp4.atlassian.net/` |
+| Jira account email | `PES2PGE25DS065@stu.pes.edu` |
+| Confluence site URL | `https://capstoneprojectgrp4.atlassian.net/wiki/` |
+| Confluence account email | `PES2PGE25DS065@stu.pes.edu` |
+| GitHub repository | `pavi550/Capstone` or `https://github.com/pavi550/Capstone.git` |
+| GitHub base branch | `main` or the name of an existing test branch |
+| Hidden token prompts | Paste the API token for that service. The terminal keeps the input hidden. |
+
+If an input is invalid, setup names the field, shows an example, and asks
+for that field again. If a setup step fails, the error names the step
+and gives a next action. The optional LLM check runs after saving `.env`.
+
+The wizard saves the selected settings in the private root `.env`.
+Adding GitHub later leaves the Jira, Confluence, and LLM settings in place.
+Use the service-specific launch commands in step 4 after setup.
+
+The setup runs either OpenAI or Ollama at a given step. The backup takes
+over on retryable provider failures. GitHub Copilot has no direct Capstone
+adapter. See the [provider and fallback guide](mcp/README.md#automatic-fallback).
+
+The optional LLM check asks before sending a synthetic tool request to
+the selected provider. Hosted providers may charge for this check. It
+does not query Jira or GitHub. For Ollama, install the app, start it, and
+pull the chosen model yourself before running the check. Setup does not
+download models. To skip all prompts, pass `--smoke-only` to the setup
+command.
+
+The repo already includes `pyproject.toml` for installation and
+`mcp/config.py` for runtime settings. Pip 21.2.4 cannot handle the
+repository's editable install, which is why setup upgrades pip inside
+`.venv` before installing dependencies.
+
+For the full regression suite, paste the line for your terminal from the
+repository root. The live Ollama test skips unless you opt in.
+
+| Terminal | Full test suite |
+| --- | --- |
+| Windows PowerShell or CMD | `.\.venv\Scripts\python.exe -m pytest -q -rs` |
+| Windows Git Bash | `./.venv/Scripts/python.exe -m pytest -q -rs` |
+| macOS Terminal or Linux Bash | `./.venv/bin/python -m pytest -q -rs` |
+
+### 3. Run the live Ollama test
+
+Install [Ollama](https://ollama.com/download) and run `ollama list`. If the
+server is stopped, run `ollama serve` in a separate terminal. If the model is
+missing, download it manually with `ollama pull qwen3:8b` (about 5.2 GB).
+
+**PowerShell**
+
+```powershell
+$env:CAPSTONE_TEST_OLLAMA = "1"
+.\.venv\Scripts\python.exe -m pytest -q -s -rs tests/test_ollama_integration.py
+Remove-Item Env:CAPSTONE_TEST_OLLAMA
+```
+
+**Windows CMD**
+
+```bat
+set "CAPSTONE_TEST_OLLAMA=1"
+.\.venv\Scripts\python.exe -m pytest -q -s -rs tests/test_ollama_integration.py
+set "CAPSTONE_TEST_OLLAMA="
+```
+
+**Git Bash on Windows**
+
+```bash
+CAPSTONE_TEST_OLLAMA=1 ./.venv/Scripts/python.exe -m pytest -q -s -rs tests/test_ollama_integration.py
+```
+
+**macOS Terminal or Linux Bash**
+
+```bash
+CAPSTONE_TEST_OLLAMA=1 ./.venv/bin/python -m pytest -q -s -rs tests/test_ollama_integration.py
+```
+
+Expect two passes and a line reporting one read-only tool call and its
+end-to-end latency. A skip message identifies a missing server or model.
+The live test uses Ollama at `http://127.0.0.1:11434/v1` and the same mock Jira
+tool, so it can run without real Jira or GitHub access.
+
+### 4. Review provider and service settings
+
+The wizard can populate these settings. If you skipped provider setup and
+want to configure it manually, create your private configuration from the
+repository root.
+
+```powershell
+Copy-Item .env.example .env
+```
+
+In CMD use `copy .env.example .env`. In macOS Terminal, Linux Bash, or
+Windows Git Bash use `cp .env.example .env`.
+
+Choose **one** provider to start. Edit those rows in `.env` and leave
+`LLM_FALLBACK_PROVIDERS` empty.
+
+| Option | Account setup | Settings in `.env` |
+| --- | --- | --- |
+| Ollama (local, no API billing) | Install Ollama and pull `qwen3:8b` as above | `LLM_PROVIDER=openai_compatible`, `LLM_MODEL=qwen3:8b`, `LLM_BASE_URL=http://127.0.0.1:11434/v1`, `LLM_API_KEY=ollama`, `LLM_TIMEOUT_SECONDS=180` |
+| Gemini (eligible free tier or paid) | Create a [Google AI Studio key](https://aistudio.google.com/apikey). Choose a tool-capable model available to your project and check its [tier and quota](https://ai.google.dev/gemini-api/docs/pricing). | `LLM_PROVIDER=gemini`, `LLM_MODEL=<model-id>`, `GOOGLE_API_KEY=<your-key>` |
+| OpenAI (paid API) | Set up API billing for your project and create a [project API key](https://platform.openai.com/api-keys). | `LLM_PROVIDER=openai`, `LLM_MODEL=gpt-4o-mini`, `OPENAI_API_KEY=<your-key>` |
+| Anthropic (paid API) | Add API credits or use an organization with billing, then create an [Anthropic Console key](https://console.anthropic.com/settings/keys). | `LLM_PROVIDER=anthropic`, `LLM_MODEL=claude-sonnet-4-6`, `ANTHROPIC_API_KEY=<your-key>` |
+| Other compatible hosted API | Check the provider's plan and choose an endpoint and model that support Chat Completions tool calls. | `LLM_PROVIDER=openai_compatible`, `LLM_MODEL=<model-id>`, `LLM_BASE_URL=<provider-v1-url>`, `LLM_API_KEY=<your-key>` |
+
+Next, configure the service the agent should use. A free or local LLM still
+needs service credentials to access real Jira or GitHub data.
+
+- **Jira.** Set `JIRA_BASE_URL` to your Atlassian site, `JIRA_EMAIL` to your
+  account email, and `JIRA_API_TOKEN` to your [Atlassian token](https://id.atlassian.com/manage-profile/security/api-tokens).
+  Use a test site where your account can browse project `CP`.
+- **Confluence.** Set `CONFLUENCE_BASE_URL` to your Confluence Cloud site
+  or its `/wiki` URL, and fill in `CONFLUENCE_EMAIL` and
+  `CONFLUENCE_API_TOKEN`. Replace `jira` with `confluence` in the launch
+  command below to run a read-only connection check against the spaces API.
+  The check does not send Confluence content to the LLM.
+- **GitHub.** Set `GITHUB_REPO` to a disposable `owner/repository`,
+  `GITHUB_BRANCH` to its base branch, and `GITHUB_TOKEN` to a
+  [token](https://github.com/settings/tokens) scoped to that repository with
+  Contents and Pull requests read/write permissions. This demo can create
+  a branch, commit, and pull request.
+
+#### Run a configured service
+
+From the repository root, paste only the line for your terminal and service.
+Start with Jira on a test site or the read-only Confluence check. The Jira
+and GitHub agents use the selected LLM. The Confluence check uses the
+Atlassian API only. Use a disposable repository for the GitHub command.
+It can create a branch, commit, and pull request.
+
+**Windows PowerShell or CMD**
+
+```text
+.\.venv\Scripts\python.exe mcp/launch.py jira
+.\.venv\Scripts\python.exe mcp/launch.py confluence
+.\.venv\Scripts\python.exe mcp/launch.py github
+```
+
+**Windows Git Bash**
+
+```bash
+./.venv/Scripts/python.exe mcp/launch.py jira
+./.venv/Scripts/python.exe mcp/launch.py confluence
+./.venv/Scripts/python.exe mcp/launch.py github
+```
+
+**macOS Terminal or Linux Bash**
+
+```bash
+./.venv/bin/python mcp/launch.py jira
+./.venv/bin/python mcp/launch.py confluence
+./.venv/bin/python mcp/launch.py github
+```
+
+A successful Jira run lists open issues in `CP` and prints a summary. Hosted providers may receive issue or repository
+content and charge for API usage. Keep credentials in your ignored `.env`.
+See the [MCP setup and launch guide](mcp/README.md) for variable precedence,
+fallback, and troubleshooting. The [original SKILL.md](SKILL.md)
+is included for reference. Its paths and setup instructions describe the
+original reference bundle. Use this README for the current checkout.
+
+---
+
 ## Problem Statement
 
 Most coding-agent evaluations focus on benchmark completion rates or code-generation accuracy.
@@ -640,8 +899,9 @@ features; switch to a real LLM for that.
 ### Tests
 
 ```bash
-pip install -e . pytest ruff bandit
-pytest            # 55 tests
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]" -r mcp/requirements.txt
+python -m pytest -q -rs
 ruff check .
 bandit -r src
 ```

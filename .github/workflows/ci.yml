@@ -43,7 +43,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install package and Pytest
-        run: pip install -e . pytest
+        run: pip install -e . pytest -r mcp/requirements.txt
 
       - name: Run tests
         run: pytest

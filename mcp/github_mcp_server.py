@@ -1,25 +1,13 @@
-import asyncio
 import base64
-import os
 
 import requests
+from config import github_settings, settings
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
-if os.name == "nt":
-    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-
 mcp = MCPServer("Capstone-GitHub-SDLC-Server")
 
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "").strip()
-GITHUB_OWNER = os.getenv("GITHUB_OWNER", "pavi550").strip()
-GITHUB_REPO = os.getenv("GITHUB_REPO", "Capstone").strip()
-DEFAULT_BASE_BRANCH = os.getenv("GITHUB_BRANCH", "main").strip()
-
-if not GITHUB_TOKEN:
-    raise RuntimeError(
-        "CRITICAL: GITHUB_TOKEN is not set. Export GITHUB_TOKEN in your terminal before starting."
-    )
+GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO, DEFAULT_BASE_BRANCH = github_settings(settings())
 
 HEADERS = {
     "Authorization": f"Bearer {GITHUB_TOKEN}",
@@ -42,14 +30,14 @@ def _check_response(response: requests.Response, expected_codes: tuple[int, ...]
             f"Verify repo '{GITHUB_OWNER}/{GITHUB_REPO}', branch, or file path."
         )
     if response.status_code not in expected_codes:
-        raise ToolError(f"GitHub API Error while {action} (HTTP {response.status_code}): {response.text}")
+        raise ToolError(f"GitHub API Error while {action} (HTTP {response.status_code})")
 
 
 @mcp.tool()
 def list_repo_files(branch: str = DEFAULT_BASE_BRANCH, path_prefix: str = "", extension: str = ".java") -> str:
     """List files in the GitHub repository on a branch. Pass extension='' for all files."""
     url = f"{API_BASE}/git/trees/{branch}?recursive=1"
-    response = requests.get(url, headers=HEADERS, timeout=15)
+    response = requests.get(url, headers=HEADERS, allow_redirects=False, timeout=15)
     _check_response(response, (200,), f"listing files on branch '{branch}'")
 
     tree = response.json().get("tree", [])
@@ -81,7 +69,7 @@ def search_repo_code(keyword: str) -> str:
 
     url = "https://api.github.com/search/code"
     query = f"{keyword} repo:{GITHUB_OWNER}/{GITHUB_REPO}"
-    response = requests.get(url, headers=HEADERS, params={"q": query, "per_page": 25}, timeout=15)
+    response = requests.get(url, headers=HEADERS, params={"q": query, "per_page": 25}, allow_redirects=False, timeout=15)
     _check_response(response, (200,), f"searching code for '{keyword}'")
 
     items = response.json().get("items", [])
@@ -96,7 +84,7 @@ def read_file(file_path: str, branch: str = DEFAULT_BASE_BRANCH, start_line: int
     """Read source code lines from a file on GitHub."""
     clean_path = file_path.strip("/")
     url = f"{API_BASE}/contents/{clean_path}"
-    response = requests.get(url, headers=HEADERS, params={"ref": branch}, timeout=15)
+    response = requests.get(url, headers=HEADERS, params={"ref": branch}, allow_redirects=False, timeout=15)
     _check_response(response, (200,), f"reading '{clean_path}' on '{branch}'")
 
     data = response.json()
@@ -120,13 +108,13 @@ def create_branch(new_branch_name: str, base_branch: str = DEFAULT_BASE_BRANCH) 
         raise ToolError("New branch name must be different from the base branch.")
 
     ref_url = f"{API_BASE}/git/ref/heads/{base_branch}"
-    ref_res = requests.get(ref_url, headers=HEADERS, timeout=15)
+    ref_res = requests.get(ref_url, headers=HEADERS, allow_redirects=False, timeout=15)
     _check_response(ref_res, (200,), f"fetching SHA for base branch '{base_branch}'")
     base_sha = ref_res.json()["object"]["sha"]
 
     create_url = f"{API_BASE}/git/refs"
     payload = {"ref": f"refs/heads/{new_branch_name.strip()}", "sha": base_sha}
-    create_res = requests.post(create_url, headers=HEADERS, json=payload, timeout=15)
+    create_res = requests.post(create_url, headers=HEADERS, json=payload, allow_redirects=False, timeout=15)
 
     if create_res.status_code == 422 and "Reference already exists" in create_res.text:
         return f"Branch '{new_branch_name}' already exists; ready for commits."
@@ -145,7 +133,7 @@ def commit_file_change(file_path: str, updated_full_content: str, commit_message
     url = f"{API_BASE}/contents/{clean_path}"
 
     existing_sha = None
-    get_res = requests.get(url, headers=HEADERS, params={"ref": branch}, timeout=15)
+    get_res = requests.get(url, headers=HEADERS, params={"ref": branch}, allow_redirects=False, timeout=15)
     if get_res.status_code == 200 and isinstance(get_res.json(), dict):
         existing_sha = get_res.json().get("sha")
     elif get_res.status_code not in (200, 404):
@@ -160,7 +148,7 @@ def commit_file_change(file_path: str, updated_full_content: str, commit_message
     if existing_sha:
         payload["sha"] = existing_sha
 
-    put_res = requests.put(url, headers=HEADERS, json=payload, timeout=15)
+    put_res = requests.put(url, headers=HEADERS, json=payload, allow_redirects=False, timeout=15)
     _check_response(put_res, (200, 201), f"committing '{clean_path}' to '{branch}'")
 
     commit_sha = put_res.json().get("commit", {}).get("sha", "")[:7]
@@ -178,7 +166,7 @@ def create_pull_request(title: str, body: str, head_branch: str, base_branch: st
         "head": head_branch.strip(),
         "base": base_branch.strip()
     }
-    response = requests.post(url, headers=HEADERS, json=payload, timeout=15)
+    response = requests.post(url, headers=HEADERS, json=payload, allow_redirects=False, timeout=15)
     _check_response(response, (201,), f"raising Pull Request from '{head_branch}' to '{base_branch}'")
 
     pr_data = response.json()

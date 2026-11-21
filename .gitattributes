@@ -1,0 +1,4 @@
+mcp/run.sh text eol=lf
+mcp/run.bat text eol=crlf
+setup_env.sh text eol=lf
+setup_env.bat text eol=crlf
