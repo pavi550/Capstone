@@ -41,7 +41,7 @@ or too old.
 **Windows PowerShell or CMD**
 
 ```text
-git clone --branch makeitgeneric https://github.com/pavi550/Capstone.git
+git clone --branch main https://github.com/pavi550/Capstone.git
 cd Capstone
 .\setup_env.bat
 ```
@@ -49,7 +49,7 @@ cd Capstone
 **Windows Git Bash, macOS Terminal, or Linux Bash**
 
 ```bash
-git clone --branch makeitgeneric https://github.com/pavi550/Capstone.git
+git clone --branch main https://github.com/pavi550/Capstone.git
 cd Capstone
 bash setup_env.sh
 ```
@@ -60,8 +60,8 @@ Then update the branch and run the setup command for your terminal.
 
 ```text
 git fetch origin
-git switch makeitgeneric
-git pull --ff-only origin makeitgeneric
+git switch main
+git pull --ff-only origin main
 ```
 
 #### Setup command reference
