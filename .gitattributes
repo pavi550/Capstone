@@ -1,0 +1,2 @@
+mcp/run.sh text eol=lf
+mcp/run.bat text eol=crlf

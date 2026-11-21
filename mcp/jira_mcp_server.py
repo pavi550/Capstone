@@ -1,20 +1,13 @@
-import os
 
 import requests
+from config import jira_settings, settings
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from requests.auth import HTTPBasicAuth
 
 mcp = MCPServer("Capstone-Jira-Server")
 
-DOMAIN = "https://capstoneprojectgrp4.atlassian.net"
-EMAIL = "pes2pge25ds030@stu.pes.edu"
-API_TOKEN = os.getenv("JIRA_API_TOKEN", "ATATT3xFfGF0wrt2LMulOt6mUSfnWnilST-ifSUH2Frk0Pgo0fwSd5Uj_Q2z3vJmvxK9pgLf-6SXIthqUM_6X3HLIc3BNCYEA6sC_OqJZn1r26dYd2npUjCsU1mZsMqGeY1C2RrQOXuuzVLceteAG3n3Kug89UkFdathNYO1D7pi_XSExSFPw6w=63DDE854").strip()
-
-if not API_TOKEN or API_TOKEN == "YOUR_ACTIVE_JIRA_TOKEN":
-    raise RuntimeError(
-        "CRITICAL: JIRA_API_TOKEN is not set. Export JIRA_API_TOKEN in your terminal before running."
-    )
+DOMAIN, EMAIL, API_TOKEN = jira_settings(settings())
 
 AUTH = HTTPBasicAuth(EMAIL, API_TOKEN)
 HEADERS = {
@@ -48,7 +41,7 @@ def _check_jira_response(response: requests.Response, expected_codes: tuple[int,
     if response.status_code == 404:
         raise ToolError(f"Jira Resource Not Found (404) while {action}.")
     if response.status_code not in expected_codes:
-        raise ToolError(f"Jira API Error while {action} (HTTP {response.status_code}): {response.text}")
+        raise ToolError(f"Jira API Error while {action} (HTTP {response.status_code})")
 
 
 @mcp.tool()
@@ -60,7 +53,7 @@ def list_open_jiras(project_key: str = "CP") -> str:
         "fields": "summary,status,issuetype,priority",
         "maxResults": 50
     }
-    response = requests.get(url, headers=HEADERS, auth=AUTH, params=params, timeout=15)
+    response = requests.get(url, headers=HEADERS, auth=AUTH, params=params, allow_redirects=False, timeout=15)
     _check_jira_response(response, (200,), f"listing open Jiras for {project_key}")
 
     issues = response.json().get("issues", [])
@@ -96,7 +89,7 @@ def create_jira_ticket(
             "issuetype": {"name": issue_type}
         }
     }
-    response = requests.post(url, headers=HEADERS, auth=AUTH, json=payload, timeout=15)
+    response = requests.post(url, headers=HEADERS, auth=AUTH, json=payload, allow_redirects=False, timeout=15)
     _check_jira_response(response, (201,), f"creating Jira ticket '{summary}'")
 
     data = response.json()
@@ -117,7 +110,7 @@ def update_jira_fields(issue_key: str, summary: str = "", description: str = "")
         raise ToolError("Provide at least one of 'summary' or 'description' to update.")
 
     url = f"{DOMAIN}/rest/api/3/issue/{issue_key.strip()}"
-    response = requests.put(url, headers=HEADERS, auth=AUTH, json={"fields": fields_to_update}, timeout=15)
+    response = requests.put(url, headers=HEADERS, auth=AUTH, json={"fields": fields_to_update}, allow_redirects=False, timeout=15)
     _check_jira_response(response, (204,), f"updating fields on {issue_key}")
 
     return f"Successfully updated fields on {issue_key}."
@@ -128,7 +121,7 @@ def add_jira_comment(issue_key: str, comment_text: str) -> str:
     """Add a comment (review notes, logs, or PR link) to an existing Jira ticket."""
     url = f"{DOMAIN}/rest/api/3/issue/{issue_key.strip()}/comment"
     payload = {"body": _make_adf(comment_text)}
-    response = requests.post(url, headers=HEADERS, auth=AUTH, json=payload, timeout=15)
+    response = requests.post(url, headers=HEADERS, auth=AUTH, json=payload, allow_redirects=False, timeout=15)
     _check_jira_response(response, (201,), f"adding comment to {issue_key}")
 
     return f"Successfully added comment to {issue_key}."
@@ -139,7 +132,7 @@ def update_jira_status(issue_key: str, target_status: str) -> str:
     """Transition an existing Jira ticket to a new workflow status (e.g., 'To Do', 'In Progress', 'Done')."""
     clean_key = issue_key.strip()
     trans_url = f"{DOMAIN}/rest/api/3/issue/{clean_key}/transitions"
-    trans_res = requests.get(trans_url, headers=HEADERS, auth=AUTH, timeout=15)
+    trans_res = requests.get(trans_url, headers=HEADERS, auth=AUTH, allow_redirects=False, timeout=15)
     _check_jira_response(trans_res, (200,), f"fetching transitions for {clean_key}")
 
     transitions = trans_res.json().get("transitions", [])
@@ -165,7 +158,7 @@ def update_jira_status(issue_key: str, target_status: str) -> str:
         headers=HEADERS,
         auth=AUTH,
         json={"transition": {"id": matched_id}},
-        timeout=15
+        allow_redirects=False, timeout=15
     )
     _check_jira_response(post_res, (204,), f"transitioning {clean_key} to '{target_status}'")
 

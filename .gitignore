@@ -1,0 +1,9 @@
+.env
+.env.*
+!.env.example
+/mcp/*_server_err.log
+/.mcp-deps/
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/

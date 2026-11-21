@@ -1,0 +1,10 @@
+mcp>=2.3,<3
+langchain-core>=1.8.4,<2
+langchain-google-genai>=4.5.2,<5
+langchain-openai>=1.8.5,<2
+langchain-anthropic>=1.7.12,<2
+python-dotenv>=1.2,<2
+requests>=2.32,<3
+httpx>=0.28,<1
+anthropic>=2.12,<3
+langsmith>=0.14.9,<1
