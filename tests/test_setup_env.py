@@ -1,9 +1,11 @@
 import asyncio
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 from config import settings
 from langchain_core.messages import AIMessage, ToolMessage
+from llm_provider import create_llm
 from setup_health import TOOL_NAME, check_provider
 
 import setup_env
@@ -23,7 +25,10 @@ def test_offline_choice_leaves_no_env(monkeypatch, private_env):
 
 
 def test_configure_ollama_jira_without_sending_requests(monkeypatch, private_env):
-    answers = iter(["ollama", "", "jira", "https://jira.example.test", "dev@example.test", ""])
+    answers = iter([
+        "configure llm and services", "ollama", "", "", "jira",
+        "https://jira.example.test", "dev@example.test", "",
+    ])
     monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
     monkeypatch.setattr(setup_env.getpass, "getpass", lambda _prompt: "fixture-token")
 
@@ -39,6 +44,9 @@ def test_configure_ollama_jira_without_sending_requests(monkeypatch, private_env
         "LLM_FALLBACK_PROVIDERS": "",
         "LLM_BASE_URL": setup_env.OLLAMA_URL,
         "LLM_API_KEY": "ollama",
+        "LLM_OPENAI_COMPATIBLE_MODEL": "qwen3:8b",
+        "LLM_OPENAI_COMPATIBLE_BASE_URL": setup_env.OLLAMA_URL,
+        "LLM_OPENAI_COMPATIBLE_API_KEY": "ollama",
         "JIRA_BASE_URL": "https://jira.example.test",
         "JIRA_EMAIL": "dev@example.test",
         "JIRA_API_TOKEN": "fixture-token",
@@ -65,3 +73,54 @@ def test_optional_check_returns_mock_tool_result(monkeypatch, capsys):
     assert isinstance(tool_result, ToolMessage)
     assert tool_result.tool_call_id == "mock"
     assert "LLM test passed" in capsys.readouterr().out
+
+
+def test_existing_config_can_add_all_services_without_replacing_model(monkeypatch, private_env):
+    private_env.write_text("# Keep this comment\nLLM_PROVIDER=openai\n", encoding="utf-8")
+    answers = iter([
+        "configure services only", "jira, confluence, and github", "https://jira.example.test",
+        "jira@example.test", "https://wiki.example.test/wiki", "wiki@example.test",
+        "test-owner/test-repo", "develop",
+    ])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+    monkeypatch.setattr(setup_env.getpass, "getpass", lambda _prompt: "fixture-token")
+    setup_env.configure()
+    values = settings(private_env, {})
+    assert values["LLM_PROVIDER"] == "openai"
+    assert values["JIRA_EMAIL"] == "jira@example.test"
+    assert values["CONFLUENCE_EMAIL"] == "wiki@example.test"
+    assert values["GITHUB_REPO"] == "test-owner/test-repo"
+    assert values["GITHUB_BRANCH"] == "develop"
+    assert values["GITHUB_TOKEN"] == "fixture-token"
+    assert "# Keep this comment" in private_env.read_text(encoding="utf-8-sig")
+
+
+def test_setup_builds_openai_to_ollama_fallback(monkeypatch):
+    answers = iter(["", "ollama", ""])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+    monkeypatch.setattr(setup_env.getpass, "getpass", lambda _prompt: "fixture-key")
+    values = setup_env.model_chain("openai")
+    llm = create_llm(values=values)
+    assert [candidate[0] for candidate in llm._candidates] == ["openai", "openai_compatible"]
+    assert values["LLM_OPENAI_COMPATIBLE_MODEL"] == "qwen3:8b"
+    assert str(llm._candidates[1][1].openai_api_base).rstrip("/") == setup_env.OLLAMA_URL
+
+
+def test_read_only_confluence_check(monkeypatch, capsys):
+    import confluence_check
+
+    def send(request):
+        assert request.method == "GET"
+        assert request.url == httpx.URL("https://wiki.example.test/wiki/api/v2/spaces?limit=1")
+        assert request.headers["Authorization"].startswith("Basic ")
+        return httpx.Response(200, json={"results": []})
+
+    client = httpx.Client(transport=httpx.MockTransport(send))
+    monkeypatch.setattr(confluence_check.httpx, "Client", lambda **_kwargs: client)
+    monkeypatch.setattr(confluence_check, "settings", lambda: {
+        "CONFLUENCE_BASE_URL": "https://wiki.example.test",
+        "CONFLUENCE_EMAIL": "dev@example.test",
+        "CONFLUENCE_API_TOKEN": "fixture-token",
+    })
+    confluence_check.check()
+    assert "read-only API check passed" in capsys.readouterr().out

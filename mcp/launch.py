@@ -44,7 +44,7 @@ def main():
     # Dispatch lazily so the unused agent never validates credentials.
     args = sys.argv[1:]
     if not args:
-        print("Usage: run.sh or run.bat [jira|github] [provider] [model]")
+        print("Usage: run.sh or run.bat [jira|github|confluence] [provider] [model]")
         return 0
     agent, *options = args
     if agent.lower() == "jira":
@@ -53,7 +53,19 @@ def main():
     if agent.lower() == "github":
         from github_orchestrator import run_github_pr_workflow
         return run(run_github_pr_workflow, options)
-    print("Select jira or github.", file=sys.stderr)
+    if agent.lower() == "confluence":
+        from confluence_check import check
+
+        if options:
+            print("The Confluence check takes no provider or model argument.", file=sys.stderr)
+            return 2
+        try:
+            check()
+        except ConfigurationError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        return 0
+    print("Select jira, github or confluence.", file=sys.stderr)
     return 2
 
 

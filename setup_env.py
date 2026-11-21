@@ -39,7 +39,15 @@ def install():
         if (local_venv / "pyvenv.cfg").exists():
             raise RuntimeError("The existing .venv is broken. Rename it and rerun setup.")
         print("Creating the local Python environment...", flush=True)
-        venv.EnvBuilder(with_pip=True).create(local_venv)
+        try:
+            venv.EnvBuilder(with_pip=True).create(local_venv)
+        except subprocess.CalledProcessError:
+            raise RuntimeError(
+                "Python could not create a virtual environment with pip. On Debian or Ubuntu, "
+                "install python3-venv with sudo apt install python3-venv. On Windows or macOS, "
+                "use the installer at https://www.python.org/downloads/. "
+                "Rename the incomplete .venv and rerun setup."
+            ) from None
     try:
         run_python(python, "-c", "import sys; sys.exit(sys.version_info < (3, 11))")
     except (OSError, subprocess.CalledProcessError):
@@ -90,16 +98,28 @@ def choice(label, options, default):
 
 
 def write_env(values):
-    # python-dotenv supports single-quoted literals with escaped slashes and quotes.
-    lines = ["# Private Capstone settings created by setup_env. Keep this file local."]
+    from dotenv import set_key
+
     for name, value in values.items():
         if "\r" in value or "\n" in value:
             raise RuntimeError(f"{name} must fit on a single line.")
-        escaped = value.replace("\\", "\\\\").replace("'", "\\'")
-        lines.append(f"{name}='{escaped}'")
-    descriptor = os.open(ENV_PATH, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-        stream.write("\n".join(lines) + "\n")
+    if ENV_PATH.is_symlink():
+        raise RuntimeError("Edit the linked .env file directly.")
+    original = ENV_PATH.read_bytes() if ENV_PATH.exists() else None
+    if original is None:
+        # Exclusive creation prevents replacing a file created while the wizard was open.
+        fd = os.open(ENV_PATH, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        os.close(fd)
+    with tempfile.TemporaryDirectory(prefix=".env.setup-", dir=ENV_PATH.parent) as directory:
+        updated = Path(directory) / "settings"
+        header = b"# Private Capstone settings. Keep this file local.\n"
+        updated.write_bytes(original if original is not None else header)
+        for name, value in values.items():
+            set_key(updated, name, value, encoding="utf-8-sig", quote_mode="always")
+        if ENV_PATH.read_bytes() != (original or b""):
+            raise RuntimeError("The .env changed during setup. Rerun the wizard.")
+        updated.chmod(0o600)
+        os.replace(updated, ENV_PATH)
 
 
 def provider_settings(selected):
@@ -121,7 +141,7 @@ def provider_settings(selected):
 
 
 def service_settings(selected):
-    from config import github_settings, jira_settings
+    from config import confluence_settings, github_settings, jira_settings
 
     if selected == "jira":
         print("Use an account that can browse project CP. The wizard will not query Jira.")
@@ -132,59 +152,108 @@ def service_settings(selected):
         }
         jira_settings(values)
         return values
+    if selected == "confluence":
+        print("Confluence setup enables a read-only Cloud connection check.")
+        values = {
+            "CONFLUENCE_BASE_URL": ask("Confluence site URL (https://your-domain.atlassian.net/wiki)"),
+            "CONFLUENCE_EMAIL": ask("Confluence account email"),
+            "CONFLUENCE_API_TOKEN": ask("Confluence API token", secret=True),
+        }
+        confluence_settings(values)
+        return values
     if selected == "github":
         print("Use a test repo. The GitHub agent can create branches, commits, and pull requests.")
+        print("Create a GitHub personal access token at https://github.com/settings/tokens.")
+        print("Grant Contents and Pull requests read/write access for the selected repository.")
         values = {
             "GITHUB_REPO": ask("Test GitHub repository (owner/repository)"),
             "GITHUB_BRANCH": ask("Base branch", "main"),
-            "GITHUB_TOKEN": ask("GitHub token", secret=True),
+            "GITHUB_TOKEN": ask("GitHub personal access token", secret=True),
         }
         github_settings(values)
         return values
     return {}
 
 
+def model_chain(selected):
+    values = provider_settings(selected)
+    primary = values["LLM_PROVIDER"]
+    # Each runtime slot has independent settings. Compatible presets currently share a slot.
+    options = ("none", *(name for name, spec in PROVIDERS.items() if spec[0] != primary))
+    fallback = choice("Backup LLM if the primary has a temporary failure", options, "none")
+    if fallback != "none":
+        backup = provider_settings(fallback)
+        name = backup["LLM_PROVIDER"]
+        prefix = f"LLM_{name.upper()}_"
+        values["LLM_FALLBACK_PROVIDERS"] = name
+        values[prefix + "MODEL"] = backup["LLM_MODEL"]
+        if name == "openai_compatible":
+            values[prefix + "BASE_URL"] = backup["LLM_BASE_URL"]
+            values[prefix + "API_KEY"] = backup["LLM_API_KEY"]
+        else:
+            key_var = PROVIDERS[fallback][2]
+            values[prefix + "API_KEY"] = backup[key_var]
+            values[prefix + "BASE_URL"] = ""
+        values["LLM_TIMEOUT_SECONDS"] = str(max(
+            int(values["LLM_TIMEOUT_SECONDS"]), int(backup["LLM_TIMEOUT_SECONDS"]),
+        ))
+    # Explicit provider-specific values take precedence over prior wizard/manual overrides.
+    prefix = f"LLM_{primary.upper()}_"
+    values[prefix + "MODEL"] = values["LLM_MODEL"]
+    values[prefix + "API_KEY"] = values[PROVIDERS[selected][2]]
+    values[prefix + "BASE_URL"] = values.get("LLM_BASE_URL", "")
+    return values
+
+
 def configure():
-    # Import the repository's modules without shadowing the installed MCP SDK.
     sys.path.insert(0, str(ROOT / "mcp"))
-    from config import ConfigurationError, settings
+    from config import settings
 
     if ENV_PATH.exists():
-        print("Your existing .env was kept. To change its settings, edit it locally.")
-        if ask("Test the configured LLM now with mock data? Hosted APIs may charge (y/N)", "n").lower() == "y":
-            try:
-                check_llm(settings())
-            except ConfigurationError as exc:
-                raise RuntimeError(str(exc)) from None
+        print("Your existing .env is available. Only the settings you choose will be updated.")
+    action = choice(
+        "Next step",
+        ("finish", "configure llm and services", "configure services only", "test configured llm"),
+        "finish",
+    )
+    if action == "finish":
         return
-    print("\nChoose an LLM. Ollama runs locally. Hosted providers may charge for API use.")
-    provider = choice("Provider", ("offline smoke test only", *PROVIDERS), "offline smoke test only")
-    if provider == "offline smoke test only":
-        print("The smoke test passed. Run setup again when you want to configure an LLM.")
-        return
-
-    try:
-        values = provider_settings(provider)
-        service = choice("Service to configure", ("none", "jira", "github"), "none")
-        values.update(service_settings(service))
-        write_env(values)
-    except ConfigurationError as exc:
-        raise RuntimeError(str(exc)) from None
-    except FileExistsError:
-        print("An existing .env was kept. Edit it locally to change its settings.")
+    if action == "test configured llm":
+        if ask("Send mock data to the selected provider now? Hosted APIs may charge (y/N)", "n").lower() == "y":
+            check_llm(settings())
         return
 
-    print("Saved the private .env in the repository root.")
-    if service != "none":
-        python = r".\.venv\Scripts\python.exe" if os.name == "nt" else "./.venv/bin/python"
-        print(f"To run the {service.title()} agent from this folder: {python} mcp/launch.py {service}")
+    values = {}
+    selected = None
+    if action == "configure llm and services":
+        print("Ollama runs locally. Hosted providers may charge for API use.")
+        selected = choice("Primary provider", tuple(PROVIDERS), "ollama")
+        values.update(model_chain(selected))
+    service_options = {
+        "none": (),
+        "jira": ("jira",),
+        "confluence": ("confluence",),
+        "jira and confluence": ("jira", "confluence"),
+        "github": ("github",),
+        "jira, confluence, and github": ("jira", "confluence", "github"),
+    }
+    service = choice("Services to configure", tuple(service_options), "none")
+    services = service_options[service]
+    for name in services:
+        values.update(service_settings(name))
+    if not values:
+        return
+    write_env(values)
+    print("Saved the selected settings in the private .env.")
+    python = r".\.venv\Scripts\python.exe" if os.name == "nt" else "./.venv/bin/python"
+    for name in services:
+        print(f"Run from the repository root: {python} mcp/launch.py {name}")
         if os.name == "nt":
-            print(f"In Git Bash: ./.venv/Scripts/python.exe mcp/launch.py {service}")
-    if provider == "ollama":
-        print("If Ollama is not ready, start it and use 'ollama list' to check your chosen model.")
-        print("If the model is missing, install it manually with 'ollama pull <model>'.")
-    if ask("Test the LLM now with mock data? Hosted APIs may charge (y/N)", "n").lower() == "y":
-        check_llm(values)
+            print(f"In Git Bash: ./.venv/Scripts/python.exe mcp/launch.py {name}")
+    if selected == "ollama":
+        print("Start Ollama and run 'ollama list'. If needed, install the model with 'ollama pull'.")
+    if selected and ask("Test the primary LLM with mock data? Hosted APIs may charge (y/N)", "n").lower() == "y":
+        check_llm(settings())
 
 
 def check_llm(values):
@@ -192,8 +261,12 @@ def check_llm(values):
 
     if values.get("LLM_PROVIDER", "").strip().lower() == "auto":
         raise RuntimeError("Choose a single LLM_PROVIDER in .env before running the mock tool check.")
-    if values.get("LLM_BASE_URL") == OLLAMA_URL and values.get("LLM_API_KEY") == "ollama":
-        check_local_model(values)
+    if values.get("LLM_PROVIDER", "").strip().lower() == "openai_compatible":
+        base_url = values.get("LLM_OPENAI_COMPATIBLE_BASE_URL") or values.get("LLM_BASE_URL")
+        key = values.get("LLM_OPENAI_COMPATIBLE_API_KEY") or values.get("LLM_API_KEY")
+        if base_url == OLLAMA_URL and key == "ollama":
+            model = values.get("LLM_OPENAI_COMPATIBLE_MODEL") or values.get("LLM_MODEL", "")
+            check_local_model({"LLM_BASE_URL": base_url, "LLM_MODEL": model})
     asyncio.run(check_provider({**values, "LLM_FALLBACK_PROVIDERS": ""}))
 
 
@@ -216,7 +289,11 @@ def check_local_model(values):
 
 def main():
     if sys.version_info < (3, 11):  # noqa: UP036 - bootstrap runs before installation.
-        print("Install Python 3.11 or newer, then run setup again.", file=sys.stderr)
+        print(
+            "Install Python 3.11 or newer from https://www.python.org/downloads/. "
+            "On Windows, add Python to PATH in the installer. Open a new terminal and rerun setup.",
+            file=sys.stderr,
+        )
         return 1
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--smoke-only", action="store_true", help="Install and test without prompts.")

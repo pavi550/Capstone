@@ -82,3 +82,13 @@ def github_settings(values):
                for part in (owner, repo)) or not branch:
         raise ConfigurationError("Check GITHUB_OWNER, GITHUB_REPO and GITHUB_BRANCH.")
     return token, owner, repo, branch
+
+
+def confluence_settings(values):
+    url, email, token = required(
+        values, "CONFLUENCE_BASE_URL", "CONFLUENCE_EMAIL", "CONFLUENCE_API_TOKEN",
+    )
+    url = endpoint(url, "CONFLUENCE_BASE_URL")
+    if urlsplit(url).path not in {"", "/wiki"}:
+        raise ConfigurationError("CONFLUENCE_BASE_URL must be a Confluence Cloud site URL or end in /wiki.")
+    return url if url.endswith("/wiki") else f"{url}/wiki", email, token

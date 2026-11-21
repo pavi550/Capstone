@@ -28,7 +28,12 @@ and configuring free-tier or paid hosted providers with Jira or GitHub.
 From the repository root, use `.\setup_env.bat` in Windows PowerShell or
 CMD, or `bash setup_env.sh` in Git Bash, macOS Terminal, or Linux Bash.
 The wizard installs dependencies, runs a mocked smoke test, and offers
-to save a provider and service configuration. Use `--smoke-only` for
+to save a primary model, an optional backup, and service configuration.
+The services menu is available even when you already have a root `.env`.
+Choose **Jira and Confluence** or **Jira, Confluence, and GitHub** to configure
+multiple services in one run. To add a single service later, rerun setup
+and choose **Configure services only**, then pick that service. See
+[what to have ready for each service](../README.md#set-up-all-three-services-or-add-one-later). Use `--smoke-only` for
 an unattended setup with no credentials or live requests.
 
 For manual setup, use Python 3.11 or newer. From the repository root, install the MCP SDK v2,
@@ -174,6 +179,27 @@ also runs the same workflow with mocked Chat Completions responses.
 
 ## Automatic fallback
 
+For OpenAI first with local Ollama as backup, use the wizard or set the
+following in the root `.env`. Start Ollama and install `qwen3:8b` before
+using the fallback.
+
+```dotenv
+LLM_PROVIDER=openai
+LLM_OPENAI_MODEL=gpt-4o-mini
+OPENAI_API_KEY=
+LLM_FALLBACK_PROVIDERS=openai_compatible
+LLM_OPENAI_COMPATIBLE_MODEL=qwen3:8b
+LLM_OPENAI_COMPATIBLE_BASE_URL=http://127.0.0.1:11434/v1
+LLM_OPENAI_COMPATIBLE_API_KEY=ollama
+LLM_TIMEOUT_SECONDS=180
+```
+
+Ollama, Groq, OpenRouter, and the generic compatible option currently
+share one OpenAI-compatible slot. The wizard lets you combine one of
+those with a distinct provider such as OpenAI, Gemini, or Anthropic.
+GitHub Copilot is a separate integration and is not an API key option
+for Capstone's OpenAI adapter. See the [GitHub Copilot SDK documentation](https://docs.github.com/en/copilot/how-tos/copilot-sdk/auth/byok).
+
 ```dotenv
 LLM_PROVIDER=auto
 LLM_FALLBACK_PROVIDERS=gemini,openai,anthropic
@@ -236,6 +262,22 @@ With no arguments the launcher prints usage. Agent runs load their settings in
 Python and keep credentials out of the parent shell. An optional third argument
 selects the primary model, for example `run.bat jira openai gpt-4o-mini`.
 The scripts also accept being invoked by path from another directory.
+
+### Check Confluence Cloud
+
+Choose **Confluence** or **Jira and Confluence** in setup. From the repo
+root, run the launcher with `confluence` and no model argument.
+
+| Terminal | Command |
+| --- | --- |
+| Windows PowerShell or CMD | `.\.venv\Scripts\python.exe mcp/launch.py confluence` |
+| Windows Git Bash | `./.venv/Scripts/python.exe mcp/launch.py confluence` |
+| macOS or Linux | `./.venv/bin/python mcp/launch.py confluence` |
+
+This verifies the configured Atlassian account can use the read-only
+spaces API. It prints success or a sanitized error. The check does not
+use an LLM or provide Confluence MCP tools. See
+[Atlassian's REST authentication guide](https://developer.atlassian.com/cloud/confluence/basic-auth-for-rest-apis/).
 
 ## Troubleshooting and credential rotation
 

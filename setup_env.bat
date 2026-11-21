@@ -11,4 +11,5 @@ if not errorlevel 1 (
     exit /b
 )
 echo Install Python 3.11 or newer, then open a new terminal and rerun setup. 1>&2
+echo Download from https://www.python.org/downloads/windows/ and enable Add Python to PATH. 1>&2
 exit /b 1

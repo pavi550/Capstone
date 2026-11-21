@@ -29,7 +29,12 @@ or Jira, GitHub, or cloud credentials.
 Install [Git](https://git-scm.com/downloads) and
 [Python 3.11 or newer](https://www.python.org/downloads/). On Windows, enable
 the option to add Python to PATH in the installer. Open a new terminal in
-the folder where you want a new `Capstone` folder.
+the folder where you want a new `Capstone` folder. Run `python --version`
+on Windows or `python3 --version` on macOS/Linux to confirm the interpreter.
+On Debian or Ubuntu, install the matching `venv` package with
+`sudo apt install python3-venv` if virtual environment creation fails.
+The setup wrappers print installation instructions if Python is missing
+or too old.
 
 ### 2. Run the setup wizard
 
@@ -54,14 +59,37 @@ If you already cloned the repo, open its root (the folder with
 and run just the setup command for your terminal.
 
 Setup creates or reuses `.venv`, upgrades its pip, installs the project
-and dependencies, and runs a credential-free smoke test. When it asks for
-a provider, press **Enter** to stop after the offline test. For a real
-provider, choose Ollama, Gemini, OpenAI, Anthropic, Groq, OpenRouter, or
-another OpenAI-compatible API. The wizard asks only for settings relevant
-to that choice and offers to configure Jira or GitHub. Jira needs a site
-URL, account email, and API token. API keys and tokens are typed at hidden
-prompts. Setup saves a private root `.env` for a configured provider and
-preserves any existing `.env`.
+and dependencies, and runs a credential-free smoke test. Then choose:
+
+- **Finish** to stop after the offline test.
+- **Configure LLM and services** to set up a primary model and an optional
+  backup. For example, select OpenAI first and Ollama as the backup.
+- **Configure services only** to set up Jira, Confluence, both Jira and
+  Confluence, GitHub, or all three without changing the LLM.
+- **Test configured LLM** to check the primary model already set in `.env`.
+
+#### Set up all three services or add one later
+
+1. Run the setup command for your terminal from the Capstone root.
+2. On a fresh clone, choose **Configure LLM and services** and select your
+   primary model. If the LLM is already configured, choose **Configure services only**.
+3. Choose **Jira, Confluence, and GitHub** to enter all three in one run.
+   If you are adding one later, choose just that service.
+4. Have these details ready. Paste tokens only at the hidden prompts.
+
+   | Service | What to enter |
+   | --- | --- |
+   | Jira | Site URL, Atlassian account email, and an API token with access to the test Jira project |
+   | Confluence | Cloud site URL (with or without `/wiki`), Atlassian account email, and an API token with access to Confluence spaces |
+   | GitHub | Test repository in `owner/repository` format, base branch (default `main`), and a personal access token for that repository with Contents and Pull requests read/write permissions |
+
+The wizard saves the selected settings in the private root `.env`.
+Adding GitHub later leaves the Jira, Confluence, and LLM settings in place.
+Use the service-specific launch commands in step 4 after setup.
+
+The setup runs either OpenAI or Ollama at a given step. The backup takes
+over on retryable provider failures. GitHub Copilot has no direct Capstone
+adapter. See the [provider and fallback guide](mcp/README.md#automatic-fallback).
 
 The optional LLM check asks before sending a synthetic tool request to
 the selected provider. Hosted providers may charge for this check. It
@@ -153,6 +181,11 @@ needs service credentials to access real Jira or GitHub data.
 - **Jira.** Set `JIRA_BASE_URL` to your Atlassian site, `JIRA_EMAIL` to your
   account email, and `JIRA_API_TOKEN` to your [Atlassian token](https://id.atlassian.com/manage-profile/security/api-tokens).
   Use a test site where your account can browse project `CP`.
+- **Confluence.** Set `CONFLUENCE_BASE_URL` to your Confluence Cloud site
+  or its `/wiki` URL, and fill in `CONFLUENCE_EMAIL` and
+  `CONFLUENCE_API_TOKEN`. Replace `jira` with `confluence` in the launch
+  command below to run a read-only connection check against the spaces API.
+  The check does not send Confluence content to the LLM.
 - **GitHub.** Set `GITHUB_REPO` to a disposable `owner/repository`,
   `GITHUB_BRANCH` to its base branch, and `GITHUB_TOKEN` to a
   [token](https://github.com/settings/tokens) scoped to that repository with
@@ -173,7 +206,9 @@ A successful run lists the open issues in
 `CP` and prints a summary. Hosted providers may receive issue or repository
 content and charge for API usage. Keep credentials in your ignored `.env`.
 See the [MCP setup and launch guide](mcp/README.md) for variable precedence,
-fallback, and troubleshooting.
+fallback, and troubleshooting. The [original SKILL.md](docs/reference/capstone-multi-llm-skill/SKILL.md)
+is included for reference. Its paths and setup instructions describe the
+original reference bundle. Use this README for the current checkout.
 
 ---
 
