@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import re
 from importlib import resources
+from threading import Lock
 from typing import Any, Protocol
 
 from .config import Config
@@ -121,6 +122,8 @@ class OpenAICompatibleLLM:
 
     def __init__(self, cfg: Config):
         self.cfg = cfg
+        self._usage_lock = Lock()
+        self._usage = []
         self.api_key = cfg.secret("llm.api_key_env")
         if not self.api_key:
             raise RuntimeError(f"env var {cfg.get('llm.api_key_env')} is not set")
@@ -137,10 +140,33 @@ class OpenAICompatibleLLM:
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
             "response_format": {"type": "json_object"},
         }
+        limit = self.cfg.get("llm.max_tokens")
+        if limit is not None:
+            if type(limit) is not int or not 1 <= limit <= 32768:
+                raise ValueError("llm.max_tokens must be between 1 and 32768")
+            body["max_tokens"] = limit
         reply = request_json(
             "POST", url, headers={header: value}, body=body, timeout=self.cfg.get("llm.timeout", 120)
         )
+        usage = reply.get("usage") or {}
+        recorded_model = reply.get("model")
+        with self._usage_lock:
+            self._usage.append({
+                "task": task, "provider": self.name, "configured_model": body["model"],
+                "reported_model": recorded_model if isinstance(recorded_model, str) else None,
+                "input_tokens": _usage_count(usage.get("prompt_tokens")),
+                "output_tokens": _usage_count(usage.get("completion_tokens")),
+                "cost": None,
+            })
         return reply["choices"][0]["message"]["content"]
+
+    def usage(self) -> list[dict]:
+        with self._usage_lock:
+            return [record.copy() for record in sorted(self._usage, key=lambda row: row["task"])]
+
+
+def _usage_count(value):
+    return value if type(value) is int and value >= 0 else None
 
 
 def make_llm(cfg: Config) -> LLM:

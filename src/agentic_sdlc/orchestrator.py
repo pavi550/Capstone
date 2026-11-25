@@ -14,6 +14,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 
 from . import cicd, deploy, docs, jira
 from .agents.coding import CodingAgent
@@ -49,16 +50,28 @@ class Graph:
 
     def run(self, state: RunState, start: str, events: EventLog, max_steps: int) -> str:
         node = start
+        attempts: dict[tuple[str, str | None], int] = {}
         while node not in (END, HALT):
             if len(state.history) >= max_steps:
                 state.concern = f"state machine exceeded loops.max_steps={max_steps}"
                 node = HALT
                 break
             state.history.append(node)
-            events.emit(node, "enter", requirement=state.current, phase=state.phase)
-            self.nodes[node](state)
-            route = self.edges[node]
-            node = route(state) if callable(route) else route
+            key = (node, state.current)
+            attempts[key] = attempts.get(key, 0) + 1
+            metadata = {"requirement": state.current, "phase": state.phase, "attempt": attempts[key]}
+            events.emit(node, "enter", **metadata)
+            started = perf_counter()
+            status = "FAILED"
+            try:
+                self.nodes[node](state)
+                route = self.edges[node]
+                next_node = route(state) if callable(route) else route
+                status = "BLOCKED" if next_node == HALT else "COMPLETED"
+            finally:
+                events.emit(node, "exit", status=status,
+                            duration_ms=round((perf_counter() - started) * 1000, 3), **metadata)
+            node = next_node
         state.history.append(node)
         events.emit(node, "finish", concern=state.concern)
         return node
@@ -95,6 +108,13 @@ class Orchestrator:
         self.build_graph().run(self.state, "start", self.events, self.cfg.get("loops.max_steps"))
         self.state.outputs["events"] = str(self.events.path)
         return self.state
+
+    def stage_development(
+        self, draft: dict, source: Path, output: Path, run_id: str, attempt: int, *, allow_provider=False,
+    ) -> dict:
+        from .development import stage
+
+        return stage(self, draft, source, output, run_id, attempt, allow_provider=allow_provider)
 
     def build_graph(self) -> Graph:
         g = Graph()

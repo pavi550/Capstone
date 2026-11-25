@@ -95,3 +95,23 @@ deploy:
   environments: [dev, qa, staging, prod]
   command: null                       # template, e.g. "helm upgrade app ./chart -n {env}"
   dry_run: true
+# Evidence-based research evaluation uses separate evaluator inputs.
+evaluation:
+  index_weights: {quality: 0.4, delivery_time: 0.25, human_effort: 0.25, cost: 0.1}
+  rubric:
+    version: "1.0"
+    mandatory_gates: [requirements_approval, independent_tests, security, review_approval, dev_validation]
+    criteria:
+      requirements: {extraction: 3, criteria_completeness: 3, ambiguity: 2, traceability: 2}
+      code: {correctness: 8, completeness: 5, maintainability: 4, scope: 3}
+      testcase: {acceptance_coverage: 4, positive: 2, negative: 2, edges: 2}
+      testing: {functional_tests: 5, regression: 5, coverage: 3, build_lint: 2}
+      review: {defect_detection: 5, finding_accuracy: 4, compliance: 3, actionability: 3}
+      guardrails: {path_policy: 4, secrets: 3, security: 4, permissions: 4}
+      human: {review_effort: 4, corrections: 3, human_changes: 3}
+      validation: {final_acceptance: 2, definition_of_done: 2, artifacts: 1}
+confluence:
+  base_url: null
+  user_env: CONFLUENCE_EMAIL
+  token_env: CONFLUENCE_API_TOKEN
+  max_chars: 10000

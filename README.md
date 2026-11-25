@@ -857,6 +857,14 @@ of them can be overridden with `repo.*_command`.
 | Python | `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements.txt`, or any `.py` | `python -m compileall` | `python -m pytest` | `ruff check .` (if installed) |
 | .NET | `*.sln`, `*.csproj` | `dotnet build` | `dotnet test` | – |
 
+### Enterprise intake and research evidence
+
+Use `dev backlog`, `dev spec`, `dev context`, `dev score`, and `dev compare`
+for the new read-only intake and independent evaluation commands. The
+[implementation checklist and offline reproduction guide](docs/enterprise-implementation.md)
+records current coverage, commands, and remaining work.
+The guide also documents the approval-gated offline development demo.
+
 ### Live integrations
 
 | Integration | Config | Env vars |

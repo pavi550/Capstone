@@ -23,6 +23,11 @@ def basic_auth(user: str, secret: str) -> dict[str, str]:
     return {"Authorization": f"Basic {token}"}
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def request_json(
     method: str,
     url: str,
@@ -41,9 +46,13 @@ def request_json(
     for key, value in (headers or {}).items():
         req.add_header(key, value)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
+        opener = urllib.request.build_opener(_NoRedirect()) if headers else urllib.request
+        open_url = opener.open if headers else opener.urlopen
+        with open_url(req, timeout=timeout) as resp:
             raw = resp.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
-        raise HttpError(exc.code, exc.read().decode("utf-8", "replace")[:500]) from exc
+        # Authenticated APIs can echo submitted content in an error response.
+        message = "request failed" if headers else exc.read(500).decode("utf-8", "replace")
+        raise HttpError(exc.code, message) from None
     raw = raw.removeprefix(GERRIT_XSSI_PREFIX)
     return json.loads(raw) if raw.strip() else None
