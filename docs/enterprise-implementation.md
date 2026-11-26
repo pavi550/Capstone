@@ -1,5 +1,198 @@
 # Enterprise implementation checklist
 
+The sequential closure pass tracks pending clauses in [the requirements matrix](implementation-requirements-matrix.md). The matrix contains a clause extraction and an initial lifecycle audit. Finish auditing the individual entries before implementing additional functionality. The first unresolved lifecycle entry is `WS-1-006`.
+
+## Workstream 1 recovery checkpoint
+
+`dev recover --store DB` scans persisted running stages. An exclusive SQLite run
+lock distinguishes an active owner from an abandoned stage. Recovery records the
+decision in `lifecycle_recovery` and exposes it through `dev report`. Uncertain
+external operations require reconciliation. The command only assesses them.
+`dev spec ISSUE --store DB --intake-run-id ID` resumes a known intake without
+creating a new specification identity. Existing stage records remain readable
+after the additive migration. `lifecycle_intervals` stores worker PID, last
+recorded timestamp and monotonic duration when available.
+
+Workstream 1 remains partially implemented. Open entries are WS-1-003,
+WS-1-005 through WS-1-019. See the matrix for the exact remaining behavior.
+Focused checks passed (20 tests), along with Ruff, compilation and Git whitespace
+checks. Comprehensive verification remains pending.
+
+## Workstream 1 child checkpoint progress
+
+Parallel generation persists independent output manifests in SQLite and reuses
+a completed child only when approved inputs and current artifact digests match.
+Trial registration is atomic. Use `dev cancel --lifecycle-stage STAGE` for a
+journaled stage (with the regular run selector), or `dev experiment-cancel
+--store DB --experiment-id ID` to cancel registered trials. Focused checks
+covered intact and tampered child artifacts, stage cancellation, and trial
+registration and cancellation. Automatic external reconciliation and cleanup
+remain open. Resume the implementation at WS-1-003 by binding the original
+intake invocation and storing the source retrieval checkpoints.
+
+## Workstream 1 source and container recovery
+
+The original intake invocation binds the issue, explicit page list, criteria,
+fixture digest and effective configuration. A resumed intake reuses its verified
+source snapshot. Use a new intake to fetch updated source material. CI discovery
+checkpoints bind the repository, workflow, commit and attempt to the discovered
+run ID. Verifier container identities are journaled before launch and reconciled
+by exact label, name and container ID on verifier recovery. Lifecycle checkpoints
+also record a monotonic elapsed sample during cooperative waits.
+
+Next resume at WS-1-006. Finish interruption of bounded reads and propagation
+through owned subprocess cleanup. The matrix records remaining gaps. For this
+pass, four focused tests passed. Comprehensive verification remains pending.
+
+## Workstream 1 cancellation and timing
+
+HTTP response reads cooperate with lifecycle cancellation between chunks.
+Verifier cancellation on POSIX terminates its isolated subprocess group.
+The journal blocks completion when verifier container cleanup remains
+unconfirmed. Remote DEV recovery checks the bound deployment using GET
+and persists terminal or uncertain observations. Reports separate observed
+agent aggregate duration, wall duration and overlap.
+
+WS-1-016 and WS-1-017 are implemented with focused approval continuity and
+stale receipt coverage. Next resume at WS-1-006. Complete cancellation of
+blocked network operations and durable owned subprocess reconciliation.
+Five targeted tests passed. Comprehensive verification remains pending.
+
+## Basic functional coverage checkpoint
+
+| Workstream | Basic path | Remaining coding |
+| --- | --- | --- |
+| Lifecycle | Journaled stages, approvals, resume and local recovery | Preserve the eight open WS-1 entries. |
+| Trusted CI | Existing protected evaluator, monitoring and signed raw archive ingestion | Independent review evaluation in CI and protected end-to-end target verification. |
+| Rubric | Authenticated local and CI observations feed the existing scorer | Collector coverage, review ground truth and additional automated score snapshots. |
+| Providers | Existing adapters and shared budgets, including an optional per-requirement run ceiling | Experiment-wide policy binding across trial overrides and extended usage handling. |
+| Research | Isolated trials, comparisons and independent human baseline submission | Managed baseline execution evidence collection and automatic terminal measurements. |
+| Remote DEV | Broker client/server, pending queue worker, hosted Docker and Kubernetes | Broker restart recovery and deployment-specific verification. |
+| Jira | Hosted ingress with optional polling, requirement draft worker and renewal ticks | Worker leases, recovery and direct Jira event authentication remain partial. |
+
+Run `dev experiment-baseline --directory TRIALS --trial ID --measurements SEALED_JSON
+--deliverable PATH --config POLICY` to submit human measurements. Seal the payload
+under verifier purpose `human-baseline` and bind the experiment, trial, deliverable
+manifest digest and evidence. `dev dev-broker-work --store DB --config POLICY`
+selects the oldest pending deployment. Hosted Jira enables optional worker ticks
+through `enterprise.intake.hosted.drain_enabled` and `poll_enabled`. Renewal uses
+the existing `enterprise.intake.webhook.auto_renew` policy. Automatic provider
+execution is excluded from the hosted draft worker, which preserves approval gates.
+
+Three targeted CI and broker tests passed. Ruff, compilation and Git whitespace
+checks passed. Comprehensive verification remains pending. Resume the basic pass
+at WS-2 review evaluation, then connect remaining mandatory handoffs. The
+requirement-level statuses remain separate from the existence of a basic path.
+
+## Basic handoff progress
+
+- Trusted CI consumes `review.json` beside the existing target bundle manifest.
+  Place independent `review-reference.json` in the protected acceptance parent
+  and acceptance tests under its `tests/` child. The reference binds specification,
+  manifest and canonical findings digests, and includes defect IDs and labels.
+  Signed review evidence feeds defect detection and finding accuracy. Missing
+  review labels remain unevaluated; unlabelled findings remain unverified.
+- Managed experiment plans bind `effective_configuration_sha256` to canonical
+  sorted JSON of the effective configuration. The first executable trial pins
+  that digest in SQLite. Development and verification reject trial overrides.
+  Trial execution and cancellation write evidence under `execution-evidence/`.
+- Hosted Jira can explicitly enable the Requirement Agent through
+  `enterprise.intake.hosted.allow_provider`, which defaults to false.
+
+The basic milestone remains open. The next handoff is automated export and
+submission of the exact stored review and artifact to protected CI, followed
+by conversion of managed terminal evidence into comparative measurements.
+Direct Jira event authentication and orchestration across the remaining stage
+boundaries also remain open. Three focused tests and static checks passed.
+No comprehensive or live verification was performed.
+
+## Essential transfer progress
+
+`dev ci-bundle --store DB --run-id ID --config POLICY --output DIRECTORY`
+exports the approved specification and verified artifact. Add `--include-review`
+to include the exact stored review after local verification. This creates a new
+local directory. Authorized publication and CI dispatch are still separate handoffs.
+
+Experiment reports read managed evidence when an explicit measurement is absent.
+Available elapsed time, measured human effort, token usage, estimated provider
+cost and receipts are surfaced. Total cost and incomplete measurements remain
+unavailable. CSV and Markdown integration remains open.
+
+Direct Jira Cloud admin webhooks use `POST /jira/direct`. Configure
+`enterprise.intake.direct.mode: jira_cloud_admin_hmac`, the tenant hostname and a
+`secret_env` pointing to a unique per-tenant secret. The route validates
+`X-Hub-Signature` before evaluating the tenant and project. The relay route remains
+separate. See [Atlassian secure Jira webhooks](https://developer.atlassian.com/cloud/jira/platform/webhooks/).
+
+Next resume at authorized publication of the local bundle, persisted CI dispatch
+identity and monitoring handoff. Full verification remains pending.
+
+## Authorized CI and report handoffs
+
+Use `dev ci-submit --store DB --run-id ID --config POLICY --actor VERIFIER
+--authorize-submission` for initial CI after approved artifact generation.
+After review, repeat with `--include-review`. Enable both
+`github.allow_bundle_publication` and `github.allow_dispatch`. Configure a
+separate `github.bundle_branch` in a private repository, and allow the protected
+workflow ref in `github.dispatch_refs`. Configure `dispatch_ref` and
+`dispatch_commit` in `enterprise.delivery_policy.remote_ci`. The commit pins
+the evaluator workflow run identity; the verified artifact and optional review
+have independent digests. Protect the signing environment and workflow revision.
+Never use the bundle publication branch as a dispatch ref.
+
+SQLite records publication and dispatch intents. The dispatch API returns the
+exact run ID; monitoring and attestation consume that ID directly. If an
+external write outcome is uncertain, reconcile it before another submission.
+When the automation policy is configured, review requires initial CI evidence
+and delivery also requires independent evidence for the exact approved review.
+
+Use `dev experiment-report --directory TRIALS --report-dir OUTPUT` to export
+JSON, CSV and Markdown from one normalized report. The projection includes
+available recorded delivery, human, agent, approval, quality, review and provider
+measurements. Missing values stay unavailable. Comprehensive and live workflow
+verification are deferred. Autonomous sequencing between operator-driven stages
+and full comparative evidence coverage remain open.
+
+## Unified operator workflow
+
+Start with `dev workflow-start ISSUE --store DB --config POLICY --repo SOURCE
+--out OUTPUT --acceptance-dir TESTS --actor VERIFIER`. Use
+`dev workflow-resume --store DB --run-id ID` after an approval or pause. The
+existing approval commands still require the human actor and exact digest.
+A single resumed invocation drives ordinary stage transitions. The independent
+stage commands remain available. Enable provider and remote permissions with
+`--allow-provider`, `--authorize-ci` and `--authorize-remote-dev` as applicable.
+
+Unified runs persist a plan, current stage and outcome in SQLite. They reuse
+the existing generation, testing, submission, review, correction, validation
+and score handlers. CI quality runs before review. Independent CI review runs
+against the stored review. Managed trials can be selected with `--experiment`
+and `--trial`; reports reuse normalized evidence and identify unavailable inputs.
+Human baselines require an independently signed submission. Assisted runs pause
+for recorded human coding or testing participation before agent work begins.
+
+Basic orchestration was checked with mocked approval pauses, CI ordering and
+DEV handoff. Comprehensive verification remains pending. Next check the real
+local verification, blocked correction and post-approval resume paths together
+using an authorized disposable fixture. Advanced recovery remains deferred.
+
+## Local review and workflow integration
+
+Configure `enterprise.delivery_policy.local_review.reference_dir` outside the
+evaluated workspaces. Store independent references as `MANIFEST_SHA256.json`
+with the same specification, manifest, findings digest, defects and labels as
+the trusted CI reference. Set `local_review.required` to pause final approval
+readiness until applicable local labels can be evaluated. A configured remote
+CI requirement continues to use remote evidence exclusively.
+
+The unified workflow now evaluates and signs local review evidence, archives
+it on correction and exposes applicable metrics to scoring and reports.
+A disposable fixture checked the real CLI and SQLite handlers with mocked
+provider and Docker boundaries. It covered both digest-bound approvals, one
+bounded correction, reevaluation, post-approval validation, scoring and report
+generation. The basic routing is implemented. Live and comprehensive
+verification, advanced recovery and exhaustive evidence collection are pending.
+
 ## Closure pass ? 26 November 2026
 
 **Implementation remains incomplete. Comprehensive verification remains deferred.**

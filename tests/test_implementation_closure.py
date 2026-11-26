@@ -315,3 +315,379 @@ def test_broker_worker_connects_artifact_to_signed_receipt(tmp_path, monkeypatch
     assert len(calls) == 1
     mac = result.pop('mac')
     assert mac == hmac.new(b's' * 32, json.dumps(result, sort_keys=True).encode(), hashlib.sha256).hexdigest()
+
+
+def test_recovery_distinguishes_active_lock_from_abandoned_stage(tmp_path):
+    store, run = store_run(tmp_path)
+    with closing(store._connect()) as connection, connection:
+        connection.execute("INSERT INTO lifecycle_stages VALUES (?, 'validate', 1, ?, NULL, 'RUNNING', NULL, NULL)",
+                           (run, "2026-01-01T00:00:00+00:00"))
+    import sqlite3
+
+    with closing(sqlite3.connect(lifecycle._lock_path(store, run))) as lock:
+        lock.execute("BEGIN EXCLUSIVE")
+        assert lifecycle.recover(store)[0]["action"] == "WAIT_FOR_ACTIVE_WORKER"
+        assert lifecycle.recovery_history(store, run) == []
+    assert lifecycle.recover(store)[0]["action"] == "REQUIRE_OPERATOR_ACTION"
+    assert lifecycle.recover(store) == []
+    assert lifecycle.recovery_history(store, run)[0]["external_status"] == "UNCERTAIN"
+    assert store.lifecycle_stages(run)[0]["state"] == "INTERRUPTED"
+    assert store.lifecycle_stages(run)[0]["duration_seconds"] is None
+
+
+def test_lifecycle_records_monotonic_duration_and_preserves_approval_wait(tmp_path):
+    store, run = store_run(tmp_path)
+    lifecycle.execute(store, run, "requirements", lambda: {"status": "AWAITING_APPROVAL"})
+    assert lifecycle.recover(store) == []
+    stage = store.lifecycle_stages(run)[0]
+    assert stage["state"] == "WAITING_FOR_APPROVAL"
+    assert stage["duration_seconds"] >= 0
+    assert stage["worker_id"]
+
+
+def test_parallel_checkpoint_reuses_only_intact_child_output(tmp_path):
+    from types import SimpleNamespace
+
+    from agentic_sdlc.development import _recoverable_generate
+
+    store, run = store_run(tmp_path)
+    calls = []
+
+    def generate(work, workspace):
+        calls.append(work)
+        (workspace / "app.py").write_text("VALUE = 1", encoding="utf-8")
+        return ["app.py"], []
+
+    agent = SimpleNamespace(implement=generate)
+    for attempt in range(3):
+        workspace = tmp_path / str(attempt)
+        workspace.mkdir()
+        lifecycle.execute(store, run, "resume", lambda attempt=attempt, workspace=workspace: _recoverable_generate(
+            agent, "implement", attempt, workspace, "same-inputs",
+        ))
+        assert (workspace / "app.py").read_text() == "VALUE = 1"
+        if attempt == 1:
+            (tmp_path / "0" / "app.py").write_text("tampered")
+    assert calls == [0, 2]
+    assert [row["artifact_integrity"] for row in lifecycle.recovery_history(store, run)] == ["VERIFIED", "INVALID"]
+
+
+def test_stage_cancellation_propagates_to_child(tmp_path):
+    store, run = store_run(tmp_path)
+
+    def operation():
+        result = lifecycle.cancel_stage(store, run, "resume", requester="operator", reason="fixture")
+        assert result["status"] == "CANCELLING"
+        lifecycle.child("implement", lambda: pytest.fail("Cancelled child executed"))
+
+    with pytest.raises(lifecycle.StageCancelled):
+        lifecycle.execute(store, run, "resume", operation)
+    assert store.lifecycle_stages(run)[0]["state"] == "CANCELLED"
+    with pytest.raises(lifecycle.StageCancelled):
+        lifecycle.execute(store, run, "resume", operation)
+
+
+def test_experiment_cancellation_propagates_to_registered_runs(tmp_path):
+    directory = tmp_path / "trials"
+    scenarios.materialize("bug-fix", directory, tmp_path / "trusted")
+    store, _ = store_run(tmp_path)
+    scheduled = experiments.schedule(store, directory)
+    result = experiments.cancel_experiment(store, scheduled["experiment_id"])
+    assert len(result["trials"]) == 3
+    assert all(store.get(trial["run_id"])["cancelled_at"] for trial in result["trials"])
+
+
+def test_intake_reuses_original_sources_and_rejects_changed_invocation(tmp_path, monkeypatch):
+    from argparse import Namespace
+
+    from agentic_sdlc import cli
+
+    store, run = store_run(tmp_path)
+    calls = []
+    policy = Config.load(overrides={"jira": {"enabled": True, "base_url": "https://fixture.invalid"}})
+    monkeypatch.setattr(cli.Config, "load", lambda *args, **kwargs: policy)
+
+    class Jira:
+        base = "https://fixture.invalid"
+
+        def __init__(self, config):
+            pass
+
+        def get_issue(self, issue):
+            calls.append(issue)
+            return {"key": issue, "fields": {"summary": "Fixture", "description": "Fixture"}}
+
+    monkeypatch.setattr(cli, "JiraClient", Jira)
+    finish = SpecificationStore.finish_intake
+
+    def fail(*args):
+        raise KeyboardInterrupt
+
+    args = Namespace(store=store.path, issue="FIX-1", intake_run_id=run, config=None,
+                     page_id=None, criteria_file=None, allow_provider=False)
+    monkeypatch.setattr(SpecificationStore, "finish_intake", fail)
+    with pytest.raises(KeyboardInterrupt):
+        cli._dev_spec(args)
+    args.page_id = ["42"]
+    with pytest.raises(ValueError, match="Intake inputs changed"):
+        cli._dev_spec(args)
+    args.page_id = None
+    monkeypatch.setattr(SpecificationStore, "finish_intake", finish)
+    assert cli._dev_spec(args)["run_id"] == run
+    assert calls == ["FIX-1"]
+
+
+def test_container_reconciliation_removes_only_owned_id(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from agentic_sdlc import container_verifier
+
+    store, run = store_run(tmp_path)
+    commands = []
+    name = "capstone-verify-" + "b" * 32
+    identity = "a" * 64
+
+    def run_command(command, **kwargs):
+        commands.append(command)
+        return SimpleNamespace(stdout=identity if len(commands) == 1 else "")
+
+    monkeypatch.setattr(container_verifier.subprocess, "run", run_command)
+
+    def interrupted():
+        container_verifier._container_records(["docker"], {}, "daemon", register=name)
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        lifecycle.execute(store, run, "testing", interrupted)
+    lifecycle.execute(store, run, "testing", lambda: container_verifier._container_records(["docker"], {}, "daemon"))
+    assert commands[1] == ["docker", "rm", "-f", identity]
+    assert all(f"label=capstone.verifier={name}" in call for call in (commands[0], commands[2]))
+    with closing(store._connect()) as conn:
+        assert conn.execute("SELECT cleanup_state FROM lifecycle_containers").fetchone()[0] == "VERIFIED_ABSENT"
+
+
+def test_cancelled_http_stream_checks_between_chunks(tmp_path, monkeypatch):
+    from agentic_sdlc import httpclient
+
+    store, run = store_run(tmp_path)
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            self.closed = True
+
+        def read1(self, _size):
+            store.cancel(run)
+            return b'{"partial":'
+
+    response = Response()
+    monkeypatch.setattr(httpclient.urllib.request, "urlopen", lambda *_args, **_kwargs: response)
+    with pytest.raises(lifecycle.StageCancelled):
+        lifecycle.execute(store, run, "testing", lambda: httpclient.request_json("GET", "https://fixture.invalid"))
+    assert response.closed
+    assert store.lifecycle_stages(run)[0]["state"] == "CANCELLED"
+
+
+def test_unresolved_container_blocks_cancellation_completion(tmp_path):
+    store, run = store_run(tmp_path)
+
+    def operation():
+        with closing(store._connect()) as conn, conn:
+            conn.execute("INSERT INTO lifecycle_containers VALUES (?, ?, 'testing', 1, 'fixture', 'PENDING')",
+                         ("capstone-verify-" + "a" * 32, run))
+        lifecycle.cancel_stage(store, run, "testing")
+        lifecycle.checkpoint()
+
+    with pytest.raises(lifecycle.StageCancelled):
+        lifecycle.execute(store, run, "testing", operation)
+    assert store.lifecycle_stages(run)[0]["state"] == "BLOCKED"
+    with closing(store._connect()) as conn:
+        assert conn.execute("SELECT completed_at FROM lifecycle_stage_cancellations").fetchone()[0] is None
+
+
+def test_agent_timing_distinguishes_overlap_and_missing():
+    assert lifecycle.timing_summary([])["agent_wall_seconds"] is None
+    summary = lifecycle.timing_summary([
+        {"stage": "run/1/implement", "started_at": "2026-01-01T01:00:00+00:00", "duration_seconds": 5},
+        {"stage": "run/1/write_tests", "started_at": "2026-01-01T01:00:03+00:00", "duration_seconds": 6},
+    ])
+    assert summary == {"aggregate_agent_seconds": 11, "agent_wall_seconds": 9, "agent_overlap_seconds": 2}
+
+
+def test_trusted_ci_rejects_tampered_raw_evidence(tmp_path, monkeypatch):
+    from zipfile import ZipFile
+
+    from agentic_sdlc.delivery_evidence import sign_evaluation, verify_evaluator_archive
+
+    key = "s" * 32
+    monkeypatch.setenv("SYNTHETIC_CI_KEY", key)
+    config = Config.load(overrides={"enterprise": {"delivery_policy": {"remote_ci": {
+        "evaluator_key_env": "SYNTHETIC_CI_KEY",
+    }}}})
+    identity = dict.fromkeys(("run_id", "attempt", "commit", "repository", "workflow", "manifest_sha256",
+                             "spec_sha256", "evaluator_revision"), "fixture")
+    checks = dict.fromkeys(("acceptance", "generated", "regression", "quality", "security", "definition_of_done", "dev"),
+                           "PASSED")
+    evaluation = {"payload": {**identity, "checks": checks}, "records": [
+        {**identity, "check_id": name, "result": "PASSED", "exit_code": 0} for name in checks]}
+    signed = sign_evaluation(evaluation, identity, key)
+    archive = tmp_path / "ci.zip"
+    for changed in (False, True):
+        with ZipFile(archive, "w") as bundle:
+            bundle.writestr("attestation.json", json.dumps(signed))
+            bundle.writestr("raw-evidence.json", json.dumps({**evaluation, "tampered": changed} if changed else evaluation))
+        policy = {"required": True, "checks": ["acceptance"]}
+        if changed:
+            with pytest.raises(ValueError, match="differs"):
+                verify_evaluator_archive(config, policy, archive, identity)
+        else:
+            assert verify_evaluator_archive(config, policy, archive, identity) == signed["payload"]
+
+
+def test_independent_ci_review_uses_only_reference_labels():
+    from agentic_sdlc.delivery_evidence import evaluate_review
+
+    binding = {"spec_sha256": "a" * 64, "manifest_sha256": "b" * 64}
+    candidate = {**binding, "findings": [
+        {"id": "confirmed", "origin": "ai"},
+        {"id": "unknown", "origin": "ai", "adjudication": "incorrect"},
+    ]}
+    canonical = json.dumps(candidate, sort_keys=True, separators=(",", ":")).encode()
+    reference = {**binding, "findings_sha256": hashlib.sha256(canonical).hexdigest(),
+                 "defects": ["D1", "D2"], "labels": {"confirmed": {"adjudication": "confirmed", "defect_id": "D1"}}}
+    result = evaluate_review(candidate, reference, binding)["metrics"]["ai"]
+    assert (result["tp"], result["fp"], result["fn"], result["unverified"]) == (1, 0, 1, 1)
+    assert result["recall"] == 0.5
+    with pytest.raises(ValueError, match="different review findings"):
+        evaluate_review({**candidate, "findings": []}, reference, binding)
+
+
+def test_admin_webhook_authenticates_body_tenant_and_deduplicates(tmp_path, monkeypatch):
+    from agentic_sdlc.intake import accept_admin
+
+    secret = "fixture-secret" * 4
+    monkeypatch.setenv("TEST_ADMIN_HMAC", secret)
+    config = Config.load(overrides={"enterprise": {"intake": {"projects": ["FIX"], "direct": {
+        "mode": "jira_cloud_admin_hmac", "tenant": "fixture.atlassian.net", "secret_env": "TEST_ADMIN_HMAC",
+    }}}})
+    store, _ = store_run(tmp_path)
+    event = {"webhookEvent": "jira:issue_created", "issue": {"key": "FIX-42",
+             "self": "https://fixture.atlassian.net/rest/api/3/issue/42", "fields": {"project": {"key": "FIX"}}}}
+    body = json.dumps(event).encode()
+    signature = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    with pytest.raises(ValueError, match="signature"):
+        accept_admin(store, config, body, "")
+    accept_admin(store, config, body, signature)
+    accept_admin(store, config, body, signature)
+    assert len(store.intake_queue()) == 1
+    changed = body.replace(b"fixture.atlassian.net", b"other.atlassian.net")
+    with pytest.raises(ValueError, match="tenant"):
+        accept_admin(store, config, changed, "sha256=" + hmac.new(secret.encode(), changed, hashlib.sha256).hexdigest())
+
+
+def test_ci_dispatch_uses_returned_workflow_id(monkeypatch):
+    from agentic_sdlc import github_evidence
+
+    monkeypatch.setenv("TEST_DISPATCH_TOKEN", "fixture")
+    config = Config.load(overrides={"github": {"allow_dispatch": True, "dispatch_refs": ["main"],
+                                               "token_env": "TEST_DISPATCH_TOKEN"}})
+
+    def request(method, url, *, headers, body):
+        assert method == "POST"
+        assert url.endswith("/trusted-evaluator.yml/dispatches")
+        assert body["return_run_details"] is True
+        return {"workflow_run_id": 719}
+
+    monkeypatch.setattr(github_evidence, "request_json", request)
+    assert github_evidence.dispatch(config, "owner/repo", "trusted-evaluator.yml", "main", {}, exact=True) == {
+        "run_id": 719, "attempt": 1,
+    }
+
+
+def test_report_exports_same_missing_measurements(tmp_path):
+    from agentic_sdlc.experiments import export_report
+
+    report = {"trials": [{"id": "trial", "mode": "AGENT_DRIVEN", "measurement": None}],
+              "comparisons": [{"trial": "trial", "comparison": None}]}
+    output = tmp_path / "report"
+    export_report(output, report)
+    assert json.loads((output / "experiment.json").read_text(encoding="utf-8")) == report
+    assert "trial,AGENT_DRIVEN,," in (output / "experiment.csv").read_text(encoding="utf-8")
+    assert "Unavailable" in (output / "experiment.md").read_text(encoding="utf-8")
+
+
+def test_unified_workflow_pauses_at_both_approvals_and_orders_ci(tmp_path, monkeypatch):
+    from agentic_sdlc import cli, orchestrator, verification
+
+    store, run_id = store_run(tmp_path)
+    cfg = Config.load(overrides={"enterprise": {"delivery_policy": {"remote_ci": {"required": True}}}})
+    monkeypatch.setattr(Config, "load", lambda *_args, **_kwargs: cfg)
+    with closing(store._connect()) as db, db:
+        db.execute("INSERT INTO unified_runs(run_id, plan) VALUES (?, '{}')", (run_id,))
+    plan = {"issue": "FIX-1", "mode": "agent-driven", "config": "fixture",
+            "repo": str(tmp_path), "out": str(tmp_path / "out"),
+            "acceptance": str(tmp_path), "verifier": "fixture"}
+    draft = {"issue": "FIX-1", "status": "AWAITING_APPROVAL", "acceptance_criteria": [{"text": "fixture"}]}
+    from agentic_sdlc.specifications import specification_digest
+
+    draft["spec_sha256"] = specification_digest(draft)
+    calls = []
+    receipts = {}
+
+    def intake_stage(_args):
+        calls.append("requirements")
+        store.finish_intake(run_id, draft)
+        return {"status": "AWAITING_APPROVAL"}
+
+    def generate(_args):
+        if "generation" not in calls:
+            calls.append("generation")
+        return {"status": "READY_FOR_VERIFICATION"}
+
+    def verify(args):
+        stage = args.dev_command
+        calls.append(stage)
+        if stage == "testing":
+            receipts["actual_verification"] = {"payload": {"status": "PASSED"}}
+            return receipts["actual_verification"]["payload"]
+        if stage == "review":
+            receipts["review"] = {"status": "WAITING_REVIEW_APPROVAL"}
+            return receipts["review"]
+        assert stage == "validate"
+        return {"status": "LOCAL_DEV_VALIDATED"}
+
+    def ci_submit(*_args, include_review, authorized):
+        assert authorized
+        key = "ci_review_evidence" if include_review else "ci_evidence"
+        calls.append(key)
+        receipts[key] = {"status": "PASSED"}
+        return receipts[key]
+
+    monkeypatch.setattr(cli, "_dev_spec", intake_stage)
+    monkeypatch.setattr(cli, "_dev_run", generate)
+    monkeypatch.setattr(cli, "_dev_verification", verify)
+    monkeypatch.setattr(cli, "_dev_report", lambda _args: {"status": "COMPLETED"})
+    monkeypatch.setattr(verification, "submit_ci", ci_submit)
+    monkeypatch.setattr(store, "receipt", lambda _run, kind, **_kwargs: receipts.get(kind))
+    monkeypatch.setattr(store, "approved_specification", lambda *_args: draft)
+
+    first = orchestrator.continue_enterprise(store, run_id, plan, allow_ci=True)
+    assert first["stage"] == "requirements"
+    assert first["status"] == "WAITING_FOR_APPROVAL"
+    assert calls == ["requirements"]
+    with closing(store._connect()) as db, db:
+        db.execute("UPDATE specifications SET status='APPROVED' WHERE run_id=?", (run_id,))
+    before_ci = orchestrator.continue_enterprise(store, run_id, plan)
+    assert before_ci["stage"] == "ci-initial"
+    assert before_ci["status"] == "PAUSED"
+    before_approval = orchestrator.continue_enterprise(store, run_id, plan, allow_ci=True)
+    assert before_approval["stage"] == "review"
+    assert before_approval["status"] == "WAITING_FOR_APPROVAL"
+    assert calls == ["requirements", "generation", "testing", "ci_evidence", "review", "ci_review_evidence"]
+    receipts["review_approval"] = {"status": "APPROVED"}
+    result = orchestrator.continue_enterprise(store, run_id, plan)
+    assert result["status"] == "LOCAL_DEV_VALIDATED"
+    assert calls[-1] == "validate"
+    assert calls.count("testing") == 1

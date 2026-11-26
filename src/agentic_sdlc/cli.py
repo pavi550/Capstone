@@ -155,10 +155,20 @@ def _lifecycle_assessment(store, run_id, cfg, directory, *, include_final=True):
         with path.open("xb") as stream:
             stream.write(serialized)
     ref = [{"path": filename, "sha256": hashlib.sha256(serialized).hexdigest()}]
+    review = (facts.get("ci_review_evidence") or facts.get("ci_evidence", {})).get("evaluator", {}).get("review_evaluation") or {}
+    review = review or facts.get("local_review_evidence", {})
+    review_metrics = review.get("metrics", {}).get("ai", {})
+    automatic = {
+        name: {"ratio": review_metrics[metric], "method": "signed independent defect adjudication",
+               "reason": "Recorded independent review evaluation", "evidence": ref}
+        for name, metric in (("defect_detection", "recall"), ("finding_accuracy", "precision"))
+        if review_metrics.get(metric) is not None
+    }
     return {
         "evaluator_version": "lifecycle-receipts-v1",
         "binding": {"run_id": run_id, "attempt_id": facts["attempt_id"], "artifact_digest": facts["manifest_sha256"]},
         "criteria": {
+            **automatic,
             **{name: {"ratio": row["passed"] / row["measured"], "method": row["method"],
                        "reason": row["reason"], "evidence": ref}
                for name, row in facts.get("criterion_evidence", {}).get("criteria", {}).items()},
@@ -166,7 +176,8 @@ def _lifecycle_assessment(store, run_id, cfg, directory, *, include_final=True):
                 "ratio": int(checks[check]), "method": "independent command exit status",
                 "reason": "Recorded independent check result", "evidence": ref,
             }
-            for name, check in (("regression", "regression"), ("definition_of_done", "definition_of_done"))
+            for name, check in (("regression", "regression"), ("definition_of_done", "definition_of_done"),
+                                ("traceability", "ci_traceability"))
             if check in checks},
         },
         "gates": {name: {"passed": passed, "evidence": ref} for name, passed in gates.items()},
@@ -189,6 +200,8 @@ def _capture_lifecycle_score(store, run_id, cfg, authority, phase):
 def _dev_experiment(args):
     from . import experiments
 
+    if args.dev_command == "experiment-cancel":
+        return experiments.cancel_experiment(SpecificationStore(args.store), args.experiment_id)
     if args.dev_command == "experiment-schedule":
         return experiments.schedule(SpecificationStore(args.store), args.directory)
     if args.dev_command == "experiment-trial":
@@ -205,9 +218,15 @@ def _dev_experiment(args):
         return materialize(args.scenario, args.directory, args.evaluator, repetitions=args.repetitions)
     if args.dev_command == "experiment-prepare":
         return experiments.prepare(_read_object(args.plan), args.repo, args.directory)
+    if args.dev_command == "experiment-baseline":
+        return experiments.submit_baseline(args.directory, args.trial, _read_object(args.measurements),
+                                           args.deliverable, LocalApprovalAuthority(Config.load(args.config)))
     if args.dev_command == "experiment-record":
         return experiments.record(args.directory, args.trial, _read_object(args.measurements))
-    return experiments.summarize(args.directory, Config.load(args.config).get("evaluation.index_weights"))
+    result = experiments.summarize(args.directory, Config.load(args.config).get("evaluation.index_weights"))
+    if args.report_dir:
+        experiments.export_report(args.report_dir, result)
+    return result
 
 
 def _dev_compare(args):
@@ -245,22 +264,52 @@ def _dev_backlog(args):
 
 
 def _dev_spec(args):
+    resume_id = getattr(args, "intake_run_id", None)
     if not args.store:
+        if resume_id:
+            raise ValueError("Intake resume requires --store")
         return _generate_spec(args)
     from .lifecycle import execute
 
     store = SpecificationStore(args.store)
-    run_id = store.begin_intake(args.issue, delivery_id=getattr(args, "delivery_id", None))
-    existing = store.get(run_id)["draft"]
-    if not existing.get("intake_pending"):
-        return {"run_id": run_id, "draft": existing}
-    return execute(store, run_id, "requirements", lambda: _generate_spec(args, run_id))
+    run_id = resume_id or store.begin_intake(args.issue, delivery_id=getattr(args, "delivery_id", None))
+
+    def generate():
+        existing = store.get(run_id)["draft"]
+        if existing["issue"] != args.issue:
+            raise ValueError("Run does not belong to the selected issue")
+        if not existing.get("intake_pending"):
+            return {"run_id": run_id, "draft": existing}
+        return _generate_spec(args, run_id)
+
+    return execute(store, run_id, "requirements", generate)
 
 
 def _generate_spec(args, intake_run=None):
-    from .lifecycle import child
+    from contextlib import closing
+
+    from .lifecycle import checkpoint_digest, child, completed_output
     started_at, started = datetime.now(UTC), perf_counter()
     cfg = Config.load(args.config, enterprise_intake=True, local_model=args.allow_provider)
+    criteria_document = _read_object(args.criteria_file) if args.criteria_file else None
+    fixture = cfg.get("jira.issues_file")
+    fixture_digest = hashlib.sha256(Path(fixture).read_bytes()).hexdigest() if fixture and intake_run else None
+    source_identity = checkpoint_digest({"issue": args.issue, "pages": args.page_id or [],
+                                         "criteria": criteria_document, "fixture": fixture_digest,
+                                         "provider": args.allow_provider, "configuration": cfg.data})
+    if intake_run:
+        store = SpecificationStore(args.store)
+        with closing(store._connect()) as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("INSERT OR IGNORE INTO intake_invocations VALUES (?, ?)", (intake_run, source_identity))
+            bound = connection.execute("SELECT input_digest FROM intake_invocations WHERE run_id=?",
+                                       (intake_run,)).fetchone()[0]
+            if bound != source_identity:
+                raise ValueError("Intake inputs changed. Create a new intake to retrieve a new source snapshot.")
+
+    def source(name, retrieve):
+        return child(name, lambda: completed_output("intake-" + name, source_identity, retrieve, lambda _: True))
+
     if args.allow_provider:
         from .development import agent_model_config, validate_provider
 
@@ -277,7 +326,7 @@ def _generate_spec(args, intake_run=None):
             raise ValueError("Issue not found in the configured Jira fixture")
     elif cfg.get("jira.enabled"):
         jira = JiraClient(cfg)
-        issue = child("jira", lambda: jira.get_issue(args.issue))
+        issue = source("jira", lambda: jira.get_issue(args.issue))
         requirement = issue_to_requirement(issue)
     else:
         raise ValueError("Set jira.issues_file or enable and configure Jira")
@@ -285,14 +334,14 @@ def _generate_spec(args, intake_run=None):
     if args.page_id:
         client = ConfluenceClient(cfg)
         for page_id in dict.fromkeys(args.page_id):
-            pages.append(child("confluence-" + page_id, lambda page_id=page_id: client.read_page(page_id)))
+            pages.append(source("confluence-" + page_id, lambda page_id=page_id: client.read_page(page_id)))
     elif issue is not None and cfg.get("confluence.base_url"):
         client = ConfluenceClient(cfg)
-        pages = child("confluence", lambda: client.issue_pages(args.issue, jira.documentation_links(issue), title=requirement.title))
+        pages = source("confluence", lambda: client.issue_pages(args.issue, jira.documentation_links(issue), title=requirement.title))
     if args.criteria_file:
         if requirement.acceptance_criteria:
             raise ValueError("Operator criteria are only supported when Jira has no explicit criteria")
-        document = _read_object(args.criteria_file)
+        document = criteria_document
         criteria = document.get("acceptance_criteria")
         if (document.get("issue") != requirement.id or not isinstance(criteria, list) or not 1 <= len(criteria) <= 20
                 or any(not isinstance(text, str) or not text.strip() or len(text) > 1000 for text in criteria)
@@ -317,9 +366,13 @@ def _generate_spec(args, intake_run=None):
         from .agents.requirements import RequirementAgent
         from .llm import make_llm
 
-        model = make_llm(cfg_for_requirement)
-        draft["analysis"] = child("analysis", lambda: RequirementAgent(model).analyze(draft, pages))
-        draft["provider_usage"] = model.usage()
+        def analyze():
+            model = make_llm(cfg_for_requirement)
+            return {"analysis": RequirementAgent(model).analyze(draft, pages), "provider_usage": model.usage()}
+
+        identity = checkpoint_digest({"draft": draft, "pages": pages, "jira": issue, "policy": cfg_for_requirement.data})
+        analysis = child("analysis", lambda: completed_output("requirement-analysis", identity, analyze, lambda _: True))
+        draft.update(analysis)
         if draft["analysis"]["missing_mandatory"]:
             draft["status"] = "BLOCKED"
     if issue is not None:
@@ -393,7 +446,8 @@ def _dev_broker(args):
     store, config = SpecificationStore(args.store), Config.load(args.config)
     if args.dev_command == "dev-broker-serve":
         return serve_broker(store, config)
-    return Broker(store, config).work(args.deployment)
+    broker = Broker(store, config)
+    return broker.work(args.deployment) if args.deployment else broker.work_next()
 
 
 def _dev_webhook(args):
@@ -418,7 +472,15 @@ def _dev_intake(args):
     if args.dev_command in {"intake-serve", "intake-renew"}:
         from .intake import renewal_tick, serve
         config = Config.load(args.config)
-        return renewal_tick(store, config) if args.dev_command == "intake-renew" else serve(store, config)
+        if args.dev_command == "intake-renew":
+            return renewal_tick(store, config)
+
+        def drain():
+            return _dev_intake(argparse.Namespace(dev_command="intake-drain", store=args.store,
+                                                   config=args.config, limit=1,
+                                                   allow_provider=config.get("enterprise.intake.hosted.allow_provider", False)))
+
+        return serve(store, config, drain=drain)
     if args.dev_command == "intake-queue":
         return {"queued": store.intake_queue(), "dead_letters": store.dead_letters()}
     if args.dev_command == "intake-poll":
@@ -513,7 +575,15 @@ def _dev_status(args):
         return summarize(args.events)
     if not args.run_id:
         raise ValueError("--run-id is required with --store")
-    return SpecificationStore(args.store).get(args.run_id)
+    from contextlib import closing
+
+    store = SpecificationStore(args.store)
+    result = store.get(args.run_id)
+    with closing(store._connect()) as conn:
+        workflow = conn.execute("SELECT progress FROM unified_runs WHERE run_id=?", (args.run_id,)).fetchone()
+    if workflow:
+        result["workflow"] = json.loads(workflow["progress"]) if workflow["progress"] else None
+    return result
 
 
 def _dev_decision(args):
@@ -535,13 +605,61 @@ def _dev_decision(args):
 
 
 def _dev_cancel(args):
-    return SpecificationStore(args.store).cancel(args.run_id)
+    store = SpecificationStore(args.store)
+    if args.lifecycle_stage:
+        from .lifecycle import cancel_stage
+        return cancel_stage(store, args.run_id, args.lifecycle_stage, requester=args.actor, reason=args.reason)
+    return store.cancel(args.run_id)
+
+
+def _dev_workflow(args):
+    from contextlib import closing
+
+    from . import experiments
+    from .orchestrator import continue_enterprise
+
+    store = SpecificationStore(args.store)
+    if args.dev_command == "workflow-start":
+        if bool(args.experiment) != bool(args.trial):
+            raise ValueError("Specify both --experiment and --trial")
+        trial = None
+        if args.experiment:
+            experiment = experiments.schedule(store, args.experiment)
+            trial = next((row for row in experiment["trials"] if row["id"] == args.trial), None)
+            if trial is None or trial["mode"].lower().replace("_", "-") != args.mode:
+                raise ValueError("Trial does not match the selected workflow mode")
+            run_id = trial["run_id"]
+            if store.get(run_id)["draft"]["issue"] != args.issue:
+                raise ValueError("Workflow issue does not match the scheduled trial")
+        else:
+            run_id = store.begin_intake(args.issue)
+        plan = {
+            "issue": args.issue, "config": str(Path(args.config).resolve()),
+            "repo": str((args.experiment / args.trial if trial else args.repo).resolve()),
+            "out": str(args.out.resolve()), "acceptance": str(args.acceptance_dir.resolve()),
+            "verifier": args.actor, "mode": args.mode,
+            "experiment": str(args.experiment.resolve()) if args.experiment else None, "trial": trial,
+            "provider_required": args.allow_provider,
+        }
+        with closing(store._connect()) as conn, conn:
+            conn.execute("INSERT INTO unified_runs(run_id, plan) VALUES (?, ?)", (run_id, json.dumps(plan)))
+    else:
+        run_id = args.run_id
+        with closing(store._connect()) as conn:
+            row = conn.execute("SELECT plan FROM unified_runs WHERE run_id=?", (run_id,)).fetchone()
+        if not row:
+            raise ValueError("Run has no unified workflow plan")
+        plan = json.loads(row["plan"])
+    return continue_enterprise(store, run_id, plan, allow_provider=args.allow_provider,
+                               allow_ci=args.authorize_ci, allow_dev=args.authorize_remote_dev)
 
 
 def _dev_run(args):
     cfg = Config.load(args.config, local_model=args.allow_provider)
     from .development import agent_model_config, model_identity, validate_provider, verify_artifact
+    from .experiments import enforce_policy
 
+    enforce_policy(SpecificationStore(args.store), args.run_id, cfg)
     validate_provider(cfg, args.allow_provider)
     if args.store.resolve().is_relative_to(args.repo.resolve()):
         raise ValueError("Keep the approval database outside the source workspace")
@@ -556,6 +674,11 @@ def _dev_run(args):
         from .verification import _digest
 
         model_inputs["delivery_policy_sha256"] = _digest([ci_policy, remote_policy])
+    local_review = cfg.get("enterprise.delivery_policy.local_review", {})
+    if local_review.get("required") or local_review.get("reference_dir"):
+        from .verification import _digest
+
+        model_inputs["local_review_policy_sha256"] = _digest(local_review)
     budgets = cfg.get("enterprise.budgets", {})
     if any(budgets.values()):
         from .verification import _digest
@@ -628,15 +751,25 @@ def _export_lifecycle(directory, report):
         stream.write("\n".join(lines) + "\n")
 
 
+def _dev_recover(args):
+    from .lifecycle import recover
+
+    return {"recovery": recover(SpecificationStore(args.store))}
+
+
 def _dev_report(args):
+    from .lifecycle import recovery_history, timing_summary
+
     store = SpecificationStore(args.store)
     record = store.get(args.run_id)
     receipts = {}
     for kind in ("verification", "actual_verification", "first_pass_score", "review", "review_approval", "review_rejection", "review_adjudication",
-                 "validation", "validation_v2", "final_score"):
+                 "validation", "validation_v2", "final_score", "local_review_evidence",
+                 "ci_evidence", "ci_review_evidence", "remote_dev_validation"):
         saved = store.receipt(args.run_id, kind, optional=True)
         if saved:
             receipts[kind] = saved.get("payload", saved)
+    stages = store.lifecycle_stages(args.run_id)
     report = {
         "run_id": args.run_id, "issue": record["draft"]["issue"],
         "spec_sha256": record["digest"], "requirements_status": record["status"],
@@ -645,7 +778,9 @@ def _dev_report(args):
         "human_effort": store.human_effort(args.run_id),
         "attempt_receipt_history": store.historical_receipts(args.run_id),
         "development_attempts": record["development_attempts"],
-        "lifecycle_stages": store.lifecycle_stages(args.run_id),
+        "lifecycle_stages": stages,
+        "lifecycle_timing": timing_summary(stages),
+        "recovery": recovery_history(store, args.run_id),
         "provider_requests": store.provider_requests(args.run_id),
         "recorded_receipts": receipts,
     }
@@ -661,8 +796,16 @@ def _dev_verification(args):
 
     store = SpecificationStore(args.store)
     cfg = Config.load(args.config, local_model=getattr(args, "allow_provider", False))
+    from .experiments import enforce_policy
+
+    enforce_policy(store, args.run_id, cfg)
     authority = LocalApprovalAuthority(cfg)
     command_args = (store, args.run_id, authority)
+    if args.dev_command == "ci-submit":
+        return verification.submit_ci(*command_args, cfg, args.actor,
+                                      include_review=args.include_review, authorized=args.authorize_submission)
+    if args.dev_command == "ci-bundle":
+        return verification.export_ci_bundle(*command_args, args.output, include_review=args.include_review)
     if args.dev_command == "ci-monitor":
         from .github_evidence import monitor
         selection = _read_object(args.evidence)
@@ -708,7 +851,7 @@ def _dev(args):
         if (stage == "requirements" and not args.spec_sha256) or (stage == "review" and not args.review_sha256):
             raise ValueError("Approval stage requires the matching specification or review digest")
         registered = {"approve", "reject", "run", "resume", "correct", "code", "testcase", "verify", "testing",
-                      "review", "review-adjudicate", "validate", "score", "report", "ci-attest", "criterion-attest", "ci-monitor"}
+                      "review", "review-adjudicate", "validate", "score", "report", "ci-attest", "criterion-attest", "ci-monitor", "ci-submit"}
         if getattr(args, "run_id", None) and args.dev_command in registered:
             from .lifecycle import execute
 
@@ -733,7 +876,12 @@ def _dev_parser(sub):
     backlog.set_defaults(func=_dev, handler=_dev_backlog)
 
     spec = commands.add_parser("spec", help="draft a hashed requirement from a Jira issue")
+    recovery = commands.add_parser("recover", help="assess interrupted lifecycle executions")
+    recovery.add_argument("--store", type=Path, required=True)
+    recovery.set_defaults(func=_dev, handler=_dev_recover)
+
     spec.add_argument("issue")
+    spec.add_argument("--intake-run-id", help="resume an existing intake for this issue")
     spec.add_argument("--config")
     spec.add_argument("--page-id", action="append", help="record authorized Confluence page provenance")
     spec.add_argument("--criteria-file", type=Path, help="operator criteria JSON when Jira supplies none")
@@ -787,6 +935,27 @@ def _dev_parser(sub):
         decision.add_argument("--reason", required=(name == "reject"))
         decision.set_defaults(func=_dev, handler=_dev_decision)
 
+    for name in ("workflow-start", "workflow-resume"):
+        workflow = commands.add_parser(name, help="start or resume the complete enterprise SDLC")
+        workflow.add_argument("--store", type=Path, required=True)
+        workflow.add_argument("--allow-provider", action="store_true")
+        workflow.add_argument("--authorize-ci", action="store_true")
+        workflow.add_argument("--authorize-remote-dev", action="store_true")
+        if name == "workflow-start":
+            workflow.add_argument("issue")
+            workflow.add_argument("--mode", choices=("agent-driven", "agent-assisted", "human-baseline"),
+                                  default="agent-driven")
+            workflow.add_argument("--config", required=True)
+            workflow.add_argument("--repo", type=Path, required=True)
+            workflow.add_argument("--out", type=Path, required=True)
+            workflow.add_argument("--acceptance-dir", type=Path, required=True)
+            workflow.add_argument("--actor", required=True, help="configured independent verifier")
+            workflow.add_argument("--experiment", type=Path)
+            workflow.add_argument("--trial")
+        else:
+            workflow.add_argument("--run-id", required=True)
+        workflow.set_defaults(func=_dev, handler=_dev_workflow)
+
     for name in ("run", "resume", "correct", "code", "testcase"):
         development = commands.add_parser(name, help="stage offline development for an approved specification")
         development.add_argument("--store", type=Path, required=True)
@@ -823,6 +992,9 @@ def _dev_parser(sub):
     cancellation = commands.add_parser("cancel", help="cancel pending offline development")
     cancellation.add_argument("--store", type=Path, required=True)
     cancellation.add_argument("--run-id")
+    cancellation.add_argument("--lifecycle-stage")
+    cancellation.add_argument("--actor")
+    cancellation.add_argument("--reason")
     cancellation.set_defaults(func=_dev, handler=_dev_cancel)
 
     report = commands.add_parser("report", help="summarize stored offline execution evidence")
@@ -869,6 +1041,36 @@ def _dev_parser(sub):
             intake.add_argument("--limit", type=int, default=1)
         intake.set_defaults(func=_dev, handler=_dev_intake)
 
+    experiment_cancel = commands.add_parser("experiment-cancel", help="cancel registered experiment trials")
+    experiment_cancel.add_argument("--store", type=Path, required=True)
+    experiment_cancel.add_argument("--experiment-id", required=True)
+    experiment_cancel.set_defaults(func=_dev, handler=_dev_experiment)
+
+    baseline = commands.add_parser("experiment-baseline", help="submit an independently attested human baseline")
+    baseline.add_argument("--directory", type=Path, required=True)
+    baseline.add_argument("--trial", required=True)
+    baseline.add_argument("--measurements", type=Path, required=True)
+    baseline.add_argument("--deliverable", type=Path, required=True)
+    baseline.add_argument("--config", required=True)
+    baseline.set_defaults(func=_dev, handler=_dev_experiment)
+
+    submission = commands.add_parser("ci-submit", help="publish and monitor an approved CI evaluation")
+    submission.add_argument("--store", type=Path, required=True)
+    submission.add_argument("--run-id", required=True)
+    submission.add_argument("--config", required=True)
+    submission.add_argument("--actor", required=True)
+    submission.add_argument("--include-review", action="store_true")
+    submission.add_argument("--authorize-submission", action="store_true")
+    submission.set_defaults(func=_dev, handler=_dev_verification)
+
+    bundle = commands.add_parser("ci-bundle", help="export an exact approved artifact for evaluation")
+    bundle.add_argument("--store", type=Path, required=True)
+    bundle.add_argument("--run-id", required=True)
+    bundle.add_argument("--config", required=True)
+    bundle.add_argument("--output", type=Path, required=True)
+    bundle.add_argument("--include-review", action="store_true")
+    bundle.set_defaults(func=_dev, handler=_dev_verification)
+
     for name in ("experiment-prepare", "experiment-record", "experiment-report", "experiment-seed", "experiment-guardrails", "experiment-schedule", "experiment-trial"):
         experiment = commands.add_parser(name, help="manage a local reproducible experiment")
         experiment.add_argument("--directory", type=Path, required=True)
@@ -894,6 +1096,8 @@ def _dev_parser(sub):
             experiment.add_argument("--measurements", type=Path, required=True)
         else:
             experiment.add_argument("--config")
+        if name == "experiment-report":
+            experiment.add_argument("--report-dir", type=Path)
         experiment.set_defaults(func=_dev, handler=_dev_experiment)
 
     for name in ("dev-broker-serve", "dev-broker-work"):
@@ -901,7 +1105,7 @@ def _dev_parser(sub):
         command.add_argument("--store", type=Path, required=True)
         command.add_argument("--config", required=True)
         if name == "dev-broker-work":
-            command.add_argument("--deployment", required=True)
+            command.add_argument("--deployment")
         command.set_defaults(func=_dev, handler=_dev_broker)
 
     for name in ("jira-transition", "confluence-publish"):

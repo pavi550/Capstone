@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import tempfile
 import time
@@ -16,7 +17,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from .development import _manifest, _snapshot
-from .lifecycle import StageCancelled, checkpoint
+from .lifecycle import CleanupUnresolved, StageCancelled, checkpoint
 
 CHECK_IDS = {"acceptance", "generated", "regression", "quality", "security", "definition_of_done", "dev"}
 
@@ -47,6 +48,7 @@ def _digest_stream(stream):
 def _capture(command, *, env, timeout, cleanup):
     with subprocess.Popen(  # nosec B603 - argument vector built for the trusted local Docker CLI
         command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+        start_new_session=os.name == "posix",
     ) as process, ThreadPoolExecutor(max_workers=2) as pool:
         stdout = pool.submit(_digest_stream, process.stdout)
         stderr = pool.submit(_digest_stream, process.stderr)
@@ -63,7 +65,13 @@ def _capture(command, *, env, timeout, cleanup):
                     continue
             exit_code = process.returncode
         except (subprocess.TimeoutExpired, StageCancelled, KeyboardInterrupt) as exc:
-            process.kill()
+            if os.name == "posix":
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            else:
+                process.kill()
             process.wait()
             # Remove only the uniquely named container created for this check.
             try:
@@ -74,6 +82,42 @@ def _capture(command, *, env, timeout, cleanup):
                 raise
             exit_code = None
     return exit_code, stdout.result(), stderr.result()
+
+
+def _container_records(docker, env, host, *, register=None):
+    """Track owned verifier containers and reconcile them through the same daemon."""
+    from contextlib import closing
+
+    from .lifecycle import current_stage
+
+    context = current_stage.get()
+    if context is None:
+        return
+    store, run_id, stage, attempt = context
+    if register:
+        with closing(store._connect()) as connection, connection:
+            connection.execute("INSERT INTO lifecycle_containers VALUES (?, ?, ?, ?, ?, 'PENDING')",
+                               (register, run_id, stage, attempt, host))
+        return
+    with closing(store._connect()) as connection:
+        pending = connection.execute("SELECT name FROM lifecycle_containers WHERE run_id=? AND host=? "
+                                     "AND cleanup_state!='VERIFIED_ABSENT'", (run_id, host)).fetchall()
+    for (name,) in pending:
+        if not re.fullmatch(r"capstone-verify-[a-f0-9]{32}", name):
+            raise ValueError("Invalid owned verifier identity")
+        command = [*docker, "ps", "-aq", "--no-trunc", "--filter", f"label=capstone.verifier={name}",
+                   "--filter", f"name=^/{name}$"]
+        before = subprocess.run(command, env=env, capture_output=True, text=True, timeout=15, check=True)
+        container = before.stdout.strip()
+        if container:
+            if not re.fullmatch(r"[a-f0-9]{64}", container):
+                raise ValueError("Ambiguous owned verifier container")
+            subprocess.run([*docker, "rm", "-f", container], env=env, capture_output=True, timeout=15, check=False)
+        after = subprocess.run(command, env=env, capture_output=True, text=True, timeout=15, check=True)
+        if after.stdout.strip():
+            raise ValueError("Verifier container cleanup remains unresolved")
+        with closing(store._connect()) as connection, connection:
+            connection.execute("UPDATE lifecycle_containers SET cleanup_state='VERIFIED_ABSENT' WHERE name=?", (name,))
 
 
 class DockerVerifier:
@@ -125,6 +169,7 @@ class DockerVerifier:
                 raise ValueError("Local Docker engine is unavailable; no code was executed") from None
             if info.returncode != 0 or info.stdout.strip() != "linux":
                 raise ValueError("Local Linux Docker engine is unavailable; no code was executed")
+            _container_records(docker, env, self.host)
             workspace, trusted = private / "artifact", private / "acceptance"
             _snapshot(integrated, workspace)
             if _manifest(workspace) != expected:
@@ -144,7 +189,7 @@ class DockerVerifier:
         name = f"capstone-verify-{uuid4().hex}"
         executable, *arguments = self.checks[check]
         command = [
-            *docker, "run", "--name", name, "--rm", "--pull", "never", "--network", "none",
+            *docker, "run", "--name", name, "--label", f"capstone.verifier={name}", "--rm", "--pull", "never", "--network", "none",
             "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
             "--pids-limit", "128", "--memory", "512m", "--cpus", "1", "--user", "65532:65532",
             "--no-healthcheck", "--log-driver", "none",
@@ -157,9 +202,16 @@ class DockerVerifier:
         command.extend(("--entrypoint", executable, self.image, *arguments))
         started_at = datetime.now(UTC).isoformat()
         started = time.perf_counter()
-        exit_code, stdout, stderr = _capture(
-            command, env=env, timeout=self.timeout, cleanup=[*docker, "rm", "-f", name],
-        )
+        _container_records(docker, env, self.host, register=name)
+        try:
+            exit_code, stdout, stderr = _capture(
+                command, env=env, timeout=self.timeout, cleanup=[*docker, "rm", "-f", name],
+            )
+        finally:
+            try:
+                _container_records(docker, env, self.host)
+            except (OSError, ValueError, subprocess.SubprocessError) as exc:
+                raise CleanupUnresolved("Verifier container termination could not be confirmed") from exc
         return {
             **identity, "check_id": check, "command_id": check, "execution_mode": "LOCAL_ACTUAL",
             "image_id": self.image, "acceptance_sha256": acceptance_sha256 if check == "acceptance" else None,

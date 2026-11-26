@@ -69,6 +69,18 @@ class SpecificationStore:
                     run_id TEXT NOT NULL UNIQUE REFERENCES specifications(run_id),
                     PRIMARY KEY (experiment_id, trial_id)
                 );
+                CREATE TABLE IF NOT EXISTS experiment_execution_policy (
+                    experiment_id TEXT PRIMARY KEY, digest TEXT NOT NULL, record TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS ci_submissions (
+                    run_id TEXT NOT NULL REFERENCES specifications(run_id),
+                    correlation TEXT NOT NULL, state TEXT NOT NULL, record TEXT NOT NULL,
+                    PRIMARY KEY (run_id, correlation)
+                );
+                CREATE TABLE IF NOT EXISTS unified_runs (
+                    run_id TEXT PRIMARY KEY REFERENCES specifications(run_id),
+                    plan TEXT NOT NULL, progress TEXT
+                );
                 CREATE TABLE IF NOT EXISTS provider_usage (
                     request_id TEXT PRIMARY KEY REFERENCES provider_requests(request_id),
                     record TEXT NOT NULL
@@ -83,6 +95,41 @@ class SpecificationStore:
                     failure TEXT,
                     refs TEXT,
                     PRIMARY KEY (run_id, stage, attempt)
+                );
+                CREATE TABLE IF NOT EXISTS lifecycle_recovery (
+                    recovery_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL REFERENCES specifications(run_id),
+                    stage TEXT NOT NULL, attempt INTEGER NOT NULL,
+                    detected_at TEXT NOT NULL, previous_status TEXT NOT NULL,
+                    reason TEXT NOT NULL, artifact_integrity TEXT NOT NULL,
+                    external_status TEXT NOT NULL, action TEXT NOT NULL,
+                    decided_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS lifecycle_intervals (
+                    run_id TEXT NOT NULL, stage TEXT NOT NULL, attempt INTEGER NOT NULL,
+                    worker_id TEXT NOT NULL, heartbeat_at TEXT NOT NULL, duration_seconds REAL,
+                    PRIMARY KEY (run_id, stage, attempt)
+                );
+                CREATE TABLE IF NOT EXISTS lifecycle_checkpoints (
+                    run_id TEXT NOT NULL REFERENCES specifications(run_id),
+                    name TEXT NOT NULL, stage TEXT NOT NULL, attempt INTEGER NOT NULL,
+                    input_digest TEXT NOT NULL, payload TEXT NOT NULL, payload_digest TEXT NOT NULL,
+                    PRIMARY KEY (run_id, name, stage, attempt)
+                );
+                CREATE TABLE IF NOT EXISTS lifecycle_stage_cancellations (
+                    run_id TEXT NOT NULL REFERENCES specifications(run_id),
+                    stage TEXT NOT NULL, requested_at TEXT NOT NULL,
+                    requester TEXT, reason TEXT, completed_at TEXT,
+                    PRIMARY KEY (run_id, stage)
+                );
+                CREATE TABLE IF NOT EXISTS intake_invocations (
+                    run_id TEXT PRIMARY KEY REFERENCES specifications(run_id),
+                    input_digest TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS lifecycle_containers (
+                    name TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES specifications(run_id),
+                    stage TEXT NOT NULL, attempt INTEGER NOT NULL, host TEXT NOT NULL,
+                    cleanup_state TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS intake_failures (
                     delivery_id TEXT PRIMARY KEY,
@@ -163,7 +210,7 @@ class SpecificationStore:
                                    (run_id, datetime.now(UTC).isoformat()))
         return run_id
 
-    def create(self, draft: dict, *, delivery_id=None) -> str:
+    def create(self, draft: dict, *, delivery_id=None, trial=None) -> str:
         digest = specification_digest(draft)
         if digest != draft.get("spec_sha256"):
             raise ValueError("Specification digest mismatch")
@@ -173,6 +220,12 @@ class SpecificationStore:
         run_id = uuid4().hex
         with closing(self._connect()) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
+            if trial is not None:
+                existing = connection.execute(
+                    "SELECT run_id FROM experiment_runs WHERE experiment_id=? AND trial_id=?", trial,
+                ).fetchone()
+                if existing:
+                    return existing["run_id"]
             if delivery_id is not None:
                 event = connection.execute(
                     "SELECT issue, run_id FROM intake_events WHERE delivery_id = ?", (delivery_id,),
@@ -185,6 +238,8 @@ class SpecificationStore:
                 "INSERT INTO specifications (run_id, draft, digest, status) VALUES (?, ?, ?, ?)",
                 (run_id, json.dumps(draft), digest, status),
             )
+            if trial is not None:
+                connection.execute("INSERT INTO experiment_runs VALUES (?, ?, ?)", (*trial, run_id))
             if status == "AWAITING_APPROVAL":
                 connection.execute(
                     "INSERT INTO approval_requests VALUES (?, ?)",
@@ -583,7 +638,9 @@ class SpecificationStore:
     def lifecycle_stages(self, run_id):
         with closing(self._connect()) as connection:
             return [{**dict(row), "refs": json.loads(row["refs"] or "null")} for row in connection.execute(
-                "SELECT * FROM lifecycle_stages WHERE run_id=? ORDER BY started_at", (run_id,),
+                "SELECT stages.*, intervals.worker_id, intervals.heartbeat_at, intervals.duration_seconds "
+                "FROM lifecycle_stages stages LEFT JOIN lifecycle_intervals intervals USING(run_id, stage, attempt) "
+                "WHERE run_id=? ORDER BY started_at", (run_id,),
             )]
 
     def historical_receipts(self, run_id):

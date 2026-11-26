@@ -6,6 +6,7 @@ import base64
 import json
 import urllib.error
 import urllib.request
+from time import monotonic
 from typing import Any
 from urllib.parse import urlparse
 
@@ -35,6 +36,7 @@ def request_json(
     headers: dict[str, str] | None = None,
     body: Any = None,
     timeout: int = 60,
+    cancellable: bool = True,
 ) -> Any:
     if urlparse(url).scheme not in ("http", "https"):
         raise ValueError(f"refusing non-http(s) URL: {url}")
@@ -45,11 +47,32 @@ def request_json(
         req.add_header("Content-Type", "application/json")
     for key, value in (headers or {}).items():
         req.add_header(key, value)
+    from .lifecycle import checkpoint
+
+    if cancellable:
+        checkpoint()
+    deadline = monotonic() + timeout
     try:
         opener = urllib.request.build_opener(_NoRedirect()) if headers else urllib.request
         open_url = opener.open if headers else opener.urlopen
         with open_url(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8")
+            read_chunk = getattr(resp, "read1", None)
+            if read_chunk is None:
+                raw = resp.read().decode("utf-8")
+            else:
+                chunks = []
+                while True:
+                    if cancellable:
+                        checkpoint()
+                    if monotonic() >= deadline:
+                        raise TimeoutError("HTTP response exceeded the configured deadline")
+                    chunk = read_chunk(65536)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                raw = b"".join(chunks).decode("utf-8")
+        if cancellable:
+            checkpoint()
     except urllib.error.HTTPError as exc:
         # Authenticated APIs can echo submitted content in an error response.
         message = "request failed" if headers else exc.read(500).decode("utf-8", "replace")

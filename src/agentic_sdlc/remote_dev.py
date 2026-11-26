@@ -6,7 +6,7 @@ import time
 from urllib.parse import urlsplit
 
 from .httpclient import HttpError, request_json
-from .lifecycle import StageCancelled, checkpoint
+from .lifecycle import CleanupUnresolved, StageCancelled, checkpoint, record_reconciliation
 
 
 def run(config, binding, *, create):
@@ -31,6 +31,8 @@ def run(config, binding, *, create):
 
     def request(method, body=None):
         try:
+            if method == "DELETE":
+                return request_json(method, url, body=body, headers=headers, timeout=min(timeout, 20), cancellable=False)
             return request_json(method, url, body=body, headers=headers, timeout=min(timeout, 20))
         except HttpError as exc:
             raise RuntimeError(f"DEV broker {method} failed (HTTP {exc.status})") from None
@@ -57,18 +59,32 @@ def run(config, binding, *, create):
                         str(state.get("mac", "")),
                     ):
                         raise ValueError("DEV broker receipt signature is invalid")
+                if not create:
+                    record_reconciliation("DEV_BROKER_TERMINAL", status)
                 return state
             if status not in {"PENDING", "RUNNING", "CANCELLING"}:
                 raise ValueError("DEV broker returned an unsupported state")
             checkpoint()
             if time.monotonic() >= deadline:
-                request("DELETE")
-                raise RuntimeError("Remote DEV timed out; cancellation requested")
+                if create:
+                    request("DELETE")
+                record_reconciliation("DEV_BROKER_TIMEOUT", "UNCERTAIN")
+                raise CleanupUnresolved("Remote DEV termination is unconfirmed after timeout")
             time.sleep(min(0.5, max(0, deadline - time.monotonic())))
             state = request("GET")
-    except StageCancelled:
-        request("DELETE")
-        raise
+    except StageCancelled as exc:
+        if create:
+            try:
+                stopped = request("DELETE")
+            except (OSError, RuntimeError, ValueError):
+                stopped = None
+            if (isinstance(stopped, dict) and stopped.get("deployment_id") == deployment
+                    and stopped.get("binding") == identity and stopped.get("status") == "CANCELLED"
+                    and stopped.get("checks", {}).get("cleanup") == "PASSED"):
+                record_reconciliation("DEV_BROKER_CLEANUP_CONFIRMED", "CANCELLED")
+                raise
+        record_reconciliation("DEV_BROKER_CLEANUP_UNCONFIRMED", "UNCERTAIN")
+        raise CleanupUnresolved("Remote DEV cleanup remains unconfirmed") from exc
 
 
 class Broker:
@@ -155,6 +171,16 @@ class Broker:
             return [b'{"error":"Rejected DEV request"}']
         start_response("200 OK", [("Content-Type", "application/json")])
         return [json.dumps(result, allow_nan=False).encode()]
+
+    def work_next(self):
+        """Consume at most one pending deployment from the durable broker queue."""
+        from contextlib import closing
+
+        with closing(self.store._connect()) as connection:
+            row = connection.execute(
+                "SELECT deployment_id FROM dev_deployments WHERE state='PENDING' ORDER BY rowid LIMIT 1",
+            ).fetchone()
+        return self.work(row[0]) if row else {"status": "IDLE"}
 
     def work(self, deployment):
         import hmac

@@ -165,7 +165,7 @@ def compare(baseline, actual, index_weights=None):
     for name in MEASURES:
         pair = [record.get(name) for record in (baseline, actual)]
         values[name] = [None if value is None else _number(value, name) for value in pair]
-    if any(value is not None for value in values["total_cost"]):
+    if all(value is not None for value in values["total_cost"]):
         currency = baseline.get("currency")
         if not isinstance(currency, str) or not currency or currency != actual.get("currency"):
             raise ValueError("Cost comparisons require matching currencies")

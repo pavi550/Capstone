@@ -192,3 +192,86 @@ def test_process_observer_records_real_exit_and_stream_digests():
     assert status == 3
     assert stdout == {"sha256": hashlib.sha256(fixture).hexdigest(), "bytes": len(fixture)}
     assert stderr == {"sha256": hashlib.sha256(b"warn").hexdigest(), "bytes": 4}
+
+
+def test_disposable_unified_local_workflow_corrects_and_resumes(tmp_path, policy, monkeypatch, capsys):
+    from agentic_sdlc.llm import OpenAICompatibleLLM
+
+    monkeypatch.setenv("UNIFIED_FIXTURE_MODEL", "fixture")
+    source, acceptance, references = (tmp_path / name for name in ("source", "acceptance", "references"))
+    for directory in (source, acceptance, references):
+        directory.mkdir()
+    (acceptance / "checks.py").write_text("def test_fixture(): pass", encoding="utf-8")
+    issues = tmp_path / "issues.json"
+    issues.write_text(json.dumps([{"key": "DEMO-42", "fields": {"summary": "Fixture",
+        "description": "Acceptance Criteria:\n- Return the expected value"}}]), encoding="utf-8")
+    config = tmp_path / "policy.json"
+    cfg = policy.with_overrides({"jira": {"issues_file": str(issues)}, "llm": {
+        "provider": "openai", "base_url": "http://127.0.0.1:11434/v1",
+        "api_key_env": "UNIFIED_FIXTURE_MODEL", "model": "fixture",
+    }, "enterprise": {"delivery_policy": {"local_review": {
+        "required": True, "reference_dir": str(references),
+    }}}})
+    config.write_text(json.dumps(cfg.data), encoding="utf-8")
+    generated = 0
+
+    def complete(_self, task, _system, _user, context=None):
+        nonlocal generated
+        if task == "requirement":
+            return json.dumps({key: [] for key in ("functional", "non_functional", "security", "dependencies", "ambiguities", "missing_mandatory", "candidate_criteria")})
+        if task == "review":
+            return json.dumps({"findings": [{"severity": "high", "file": "app.py", "message": "Fixture mismatch"}]
+                               if generated == 1 else []})
+        if task == "test":
+            return json.dumps({"files": [{"path": "tests/test_app.py", "content": "def test_fixture(): pass\n"}]})
+        generated += 1
+        return json.dumps({"files": [{"path": "app.py", "content": f"VALUE = {generated}\n"}]})
+
+    monkeypatch.setattr(OpenAICompatibleLLM, "complete", complete)
+    monkeypatch.setattr(container_verifier.shutil, "which", lambda _name: "fixture-docker")
+    monkeypatch.setattr(container_verifier.subprocess, "run", lambda command, **_kw: SimpleNamespace(
+        returncode=0, stdout="" if "ps" in command else "linux",
+    ))
+    monkeypatch.setattr(container_verifier, "_capture", lambda *_args, **_kwargs: (
+        0, {"sha256": "a" * 64, "bytes": 0}, {"sha256": "b" * 64, "bytes": 0},
+    ))
+
+    evaluate = verification.local_review_evaluation
+
+    def supply_reference(store, run_id, authority, config, actor):
+        candidate = store.receipt(run_id, "review")
+        reference = {key: candidate[key] for key in ("manifest_sha256", "spec_sha256")}
+        reference.update(findings_sha256=verification._digest(candidate),
+                         defects=["fixture-defect"] if generated == 1 else [],
+                         labels={row["id"]: {"adjudication": "confirmed", "defect_id": "fixture-defect"}
+                                 for row in candidate["findings"] if row["origin"] == "ai"})
+        (references / (reference["manifest_sha256"] + ".json")).write_text(json.dumps(reference), encoding="utf-8")
+        return evaluate(store, run_id, authority, config, actor)
+
+    monkeypatch.setattr(verification, "local_review_evaluation", supply_reference)
+    db = tmp_path / "unified.db"
+    assert main(["dev", "workflow-start", "DEMO-42", "--store", str(db), "--config", str(config),
+                 "--repo", str(source), "--out", str(tmp_path / "out"), "--acceptance-dir", str(acceptance),
+                 "--actor", "verifier", "--allow-provider"]) == 0
+    initial = json.loads(capsys.readouterr().out)
+    assert initial["stage"] == "requirements"
+    assert initial["status"] == "WAITING_FOR_APPROVAL"
+    run_id = initial["run_id"]
+    store = SpecificationStore(db)
+    authority = LocalApprovalAuthority(cfg)
+    store.decide(run_id, initial["specification_sha256"], "APPROVED", "reviewer", None, authority)
+    resume = ["dev", "workflow-resume", "--store", str(db), "--run-id", run_id, "--allow-provider"]
+    assert main(resume) == 0
+    paused = json.loads(capsys.readouterr().out)
+    assert (paused["stage"], paused["status"]) == ("review", "WAITING_FOR_APPROVAL")
+    assert generated == 2
+    prior = [row["record"] for row in store.historical_receipts(run_id) if row["kind"] == "local_review_evidence"]
+    assert prior[0]["payload"]["metrics"]["ai"]["recall"] == 1.0
+    assert store.receipt(run_id, "local_review_evidence")["payload"]["attempt_id"] == 2
+    verification.approve_review(store, run_id, authority, "reviewer", paused["review_sha256"])
+    assert main(resume) == 0
+    finished = json.loads(capsys.readouterr().out)
+    assert (finished["stage"], finished["status"]) == ("delivery", "LOCAL_DEV_VALIDATED")
+    assert store.receipt(run_id, "final_score")
+    assert finished["report"]["recorded_receipts"]["final_score"]
+    assert generated == 2

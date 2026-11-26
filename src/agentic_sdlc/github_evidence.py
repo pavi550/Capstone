@@ -45,7 +45,7 @@ def collect(config, repository, run_id, attempt, commit, workflow):
     run = get(f"/attempts/{attempt}")
     head_repository = (run.get("head_repository") or {}).get("full_name", "")
     if (run.get("id") != run_id or run.get("run_attempt") != attempt or run.get("head_sha") != commit
-            or run.get("path") != path or run.get("status") != "completed"
+            or str(run.get("path", "")).partition("@")[0] != path or run.get("status") != "completed"
             or head_repository.casefold() != repository.casefold()):
         raise ValueError("GitHub Actions evidence does not match the selected workflow, repository, commit and attempt")
     jobs = records(f"/attempts/{attempt}/jobs", "jobs")
@@ -123,7 +123,7 @@ def download_artifact(config, evidence, artifact_id, output):
     return {"artifact_id": artifact_id, "digest": artifact["digest"], "bytes": len(data)}
 
 
-def dispatch(config, repository, workflow, ref, inputs):
+def dispatch(config, repository, workflow, ref, inputs, *, exact=False):
     if not config.get("github.allow_dispatch", False):
         raise ValueError("GitHub workflow dispatch is disabled by policy")
     if not re.fullmatch(r"[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+", repository) or repository.endswith(("/.", "/..")):
@@ -134,11 +134,51 @@ def dispatch(config, repository, workflow, ref, inputs):
     if not token:
         raise ValueError("Configure GITHUB_TOKEN with Actions write access for authorized workflow dispatch")
     try:
-        request_json("POST", f"https://api.github.com/repos/{repository}/actions/workflows/{workflow}/dispatches",
-                     headers={"Authorization": f"Bearer {token}"}, body={"ref": ref, "inputs": inputs})
+        headers = {"Authorization": f"Bearer {token}"}
+        payload = {"ref": ref, "inputs": inputs}
+        if exact:
+            headers["X-GitHub-Api-Version"] = "2026-03-10"
+            payload["return_run_details"] = True
+        response = request_json("POST", f"https://api.github.com/repos/{repository}/actions/workflows/{workflow}/dispatches",
+                                headers=headers, body=payload)
     except HttpError as exc:
         raise RuntimeError(f"GitHub Actions dispatch failed (HTTP {exc.status})") from None
+    if exact:
+        run = response.get("workflow_run_id") if isinstance(response, dict) else None
+        if type(run) is not int or run < 1:
+            raise ValueError("GitHub did not confirm a run ID; reconcile the dispatch before retrying")
+        return {"run_id": run, "attempt": 1}
     return {"status": "DISPATCH_REQUESTED", "repository": repository, "workflow": workflow, "ref": ref}
+
+
+def publish_bundle(config, repository, branch, name, archive):
+    import base64
+
+    if (not config.get("github.allow_bundle_publication", False)
+            or repository != config.get("enterprise.delivery_policy.remote_ci.repository")
+            or branch != config.get("github.bundle_branch")
+            or not re.fullmatch(r"[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+", repository)
+            or not re.fullmatch(r"[A-Za-z0-9_-]+", branch)
+            or not re.fullmatch(r"capstone-bundles/[a-f0-9]{64}\.zip", name)):
+        raise ValueError("CI bundle publication is outside the allowed scope")
+    if len(archive) > 10_000_000:
+        raise ValueError("CI bundle exceeds the publication limit")
+    token = config.secret("github.token_env")
+    if not token:
+        raise ValueError("Configure GitHub authentication for bundle publication")
+    metadata = request_json("GET", f"https://api.github.com/repos/{repository}",
+                            headers={"Authorization": f"Bearer {token}"})
+    if metadata.get("private") is not True:
+        raise ValueError("Approved evaluation bundles require a private repository")
+    result = request_json("PUT", f"https://api.github.com/repos/{repository}/contents/{name}",
+                          headers={"Authorization": f"Bearer {token}"}, body={
+                              "message": "Publish approved evaluation bundle",
+                              "branch": branch, "content": base64.b64encode(archive).decode("ascii"),
+                          })
+    commit = result["commit"]["sha"]
+    if not re.fullmatch(r"[a-f0-9]{40}", commit):
+        raise ValueError("Bundle publication did not return a verified commit identity")
+    return commit
 
 
 def monitor(store, run_id, config, selection):
@@ -147,7 +187,7 @@ def monitor(store, run_id, config, selection):
     import time
     from contextlib import closing
 
-    from .lifecycle import checkpoint
+    from .lifecycle import checkpoint, checkpoint_digest, completed_output
 
     policy = config.get("enterprise.delivery_policy.remote_ci", {})
     repository, workflow = policy["repository"], policy["workflow"]
@@ -166,11 +206,15 @@ def monitor(store, run_id, config, selection):
     base = f"https://api.github.com/repos/{repository}/actions"
     selected = selection.get("run_id")
     if selected is None:
-        response = request_json("GET", f"{base}/workflows/{workflow}/runs?head_sha={commit}&per_page=100", headers=headers)
-        candidates = [row for row in response["workflow_runs"] if row.get("head_sha") == commit]
-        if response.get("total_count", 101) > 100 or len(candidates) != 1:
-            raise ValueError("CI discovery is ambiguous; supply the exact workflow run ID")
-        selected = candidates[0]["id"]
+        def discover():
+            response = request_json("GET", f"{base}/workflows/{workflow}/runs?head_sha={commit}&per_page=100", headers=headers)
+            candidates = [row for row in response["workflow_runs"] if row.get("head_sha") == commit]
+            if response.get("total_count", 101) > 100 or len(candidates) != 1:
+                raise ValueError("CI discovery is ambiguous; supply the exact workflow run ID")
+            return candidates[0]["id"]
+
+        fingerprint = checkpoint_digest([repository, workflow, commit, attempt])
+        selected = completed_output("ci-discovery", fingerprint, discover, lambda value: type(value) is int and value > 0)
     if type(selected) is not int or selected < 1:
         raise ValueError("Invalid CI run identity")
     identity = {"repository": repository, "workflow": workflow, "commit": commit, "run_id": selected, "attempt": attempt}
@@ -190,7 +234,7 @@ def monitor(store, run_id, config, selection):
                 raise TimeoutError("CI monitor deadline exhausted")
             response = request_json("GET", f"{base}/runs/{selected}/attempts/{attempt}", headers=headers, timeout=min(20, timeout))
             if (response.get("id") != selected or response.get("run_attempt") != attempt
-                    or response.get("head_sha") != commit or response.get("path") != f".github/workflows/{workflow}"
+                    or response.get("head_sha") != commit or str(response.get("path", "")).partition("@")[0] != f".github/workflows/{workflow}"
                     or (response.get("head_repository") or {}).get("full_name") != repository):
                 raise ValueError("CI monitor response identity changed")
             if response.get("status") == "completed":

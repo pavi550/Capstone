@@ -11,6 +11,29 @@ on:
       spec_sha256:
         required: true
         type: string
+      bundle_ref:
+        type: string
+        default: ''
+      bundle_sha256:
+        type: string
+        default: ''
+  workflow_dispatch:
+    inputs:
+      bundle:
+        required: true
+        type: string
+      bundle_ref:
+        required: true
+        type: string
+      bundle_sha256:
+        required: true
+        type: string
+      manifest_sha256:
+        required: true
+        type: string
+      spec_sha256:
+        required: true
+        type: string
 permissions:
   contents: read
 env:
@@ -20,6 +43,7 @@ env:
   CI_WORKFLOW: ${{ vars.CAPSTONE_CALLER_WORKFLOW }}
   CI_EVALUATOR_REVISION: ${{ vars.CAPSTONE_EVALUATOR_REVISION }}
   CI_MANIFEST_SHA256: ${{ inputs.manifest_sha256 }}
+  CI_BUNDLE_SHA256: ${{ inputs.bundle_sha256 }}
   CI_SPEC_SHA256: ${{ inputs.spec_sha256 }}
 jobs:
   independent-evaluation:
@@ -38,7 +62,7 @@ jobs:
           test ${#CI_EVALUATOR_REVISION} -eq 40
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ inputs.bundle_ref || github.sha }}
           path: target
           persist-credentials: false
       - uses: actions/setup-python@v5
@@ -58,7 +82,12 @@ jobs:
           ACCEPTANCE: ${{ vars.CAPSTONE_ACCEPTANCE_DIRECTORY }}
         run: |
           python -c 'import os,pathlib; root=pathlib.Path("target").resolve(); assert (root/os.environ["BUNDLE"]).resolve().is_relative_to(root); root=pathlib.Path("evaluator").resolve(); assert (root/os.environ["ACCEPTANCE"]).resolve().is_relative_to(root)'
-          python -m agentic_sdlc.delivery_evidence evaluate --config policy.yaml --bundle "target/$BUNDLE" --acceptance "evaluator/$ACCEPTANCE" --output raw-evidence.json
+          evaluated="target/$BUNDLE"
+          if [ -n "$CI_BUNDLE_SHA256" ]; then
+            python -c 'import sys; from agentic_sdlc.delivery_evidence import unpack_bundle; from pathlib import Path; import os; unpack_bundle(Path(sys.argv[1]), Path("evaluation-input"), os.environ["CI_BUNDLE_SHA256"])' "$evaluated"
+            evaluated="evaluation-input"
+          fi
+          python -m agentic_sdlc.delivery_evidence evaluate --config policy.yaml --bundle "$evaluated" --acceptance "evaluator/$ACCEPTANCE" --output raw-evidence.json
       - uses: actions/upload-artifact@v4
         with:
           name: evaluator-raw-${{ github.run_attempt }}

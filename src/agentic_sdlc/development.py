@@ -137,6 +137,50 @@ def _generate(agent, method, work, workspace):
     return child(method, lambda: _generate_agent(agent, method, work, workspace))
 
 
+def _recoverable_generate(agent, method, work, workspace, fingerprint):
+    from .lifecycle import child, completed_output
+
+    def operation():
+        failures = []
+
+        def generate():
+            baseline = _manifest(workspace)
+            files, violations, duration = _generate_agent(agent, method, work, workspace)
+            manifest = _manifest(workspace)
+            changed = {name for name, digest in manifest.items() if baseline.get(name) != digest}
+            if (violations or not files or baseline.keys() - manifest.keys()
+                    or changed - set(files) or set(files) - manifest.keys()):
+                failures.append((files, violations, duration))
+                return None
+            return {"files": files, "workspace": str(workspace), "manifest": manifest,
+                    "duration_ms": duration}
+
+        def restore(payload):
+            source = Path(payload["workspace"])
+            try:
+                if not _entry_is_plain(source, directory=True) or _manifest(source) != payload["manifest"]:
+                    return False
+            except (OSError, ValueError):
+                return False
+            for name in payload["files"]:
+                if name not in payload["manifest"]:
+                    return False
+            for name in payload["files"]:
+                target = workspace / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source / name, target)
+            if _manifest(workspace) != payload["manifest"]:
+                raise ValueError("Restored child workspace does not match its checkpoint")
+            return True
+
+        result = completed_output(method, fingerprint, generate, restore)
+        if result is None:
+            return failures[0]
+        return result["files"], [], result["duration_ms"]
+
+    return child(method, operation)
+
+
 def _generate_agent(agent, method, work, workspace):
     start = perf_counter()
     files, violations = getattr(agent, method)(work, workspace)
@@ -268,10 +312,15 @@ def stage(orchestrator, draft, source: Path, output: Path, run_id: str, attempt:
                 "guardrail_events": _audit(violations),
                 "provider_usage": (code_llm if independent == "code" else test_llm).usage() if real_model else []}
 
+    from .lifecycle import checkpoint_digest
+
+    fingerprint = checkpoint_digest({"spec": draft["spec_sha256"], "baseline": baseline,
+                                     "policy": cfg.data, "remediation": remediation,
+                                     "source": str(source), "output": str(output)})
     start = perf_counter()
     with ThreadPoolExecutor(max_workers=2) as pool:
-        code_future = pool.submit(copy_context().run, _generate, coder, "implement", work(), code)
-        test_future = pool.submit(copy_context().run, _generate, tester, "write_tests", work(), tests)
+        code_future = pool.submit(copy_context().run, _recoverable_generate, coder, "implement", work(), code, fingerprint)
+        test_future = pool.submit(copy_context().run, _recoverable_generate, tester, "write_tests", work(), tests, fingerprint)
         coding = code_future.result()
         testing = test_future.result()
     parallel = round((perf_counter() - start) * 1000, 3)

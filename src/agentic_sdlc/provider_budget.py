@@ -13,9 +13,11 @@ def reserve(context, config, agent, input_bound, output_bound, rates):
             raise ValueError("A budgeted model request requires a stored lifecycle stage")
         return None
     store, run_id, stage, attempt = context
-    stage = stage.split("/")[0]
+    parts = stage.split("/")
+    stage = parts[2] if parts[0] == "workflow" and len(parts) > 2 else parts[0]
     policy_agent = {"test": "testcase", "code": "coding", "requirement": "requirements"}.get(agent, agent)
     scopes = [("run", "", policies.get("run", {})),
+              ("run", "", policies.get("requirement", {})),
               ("agent", agent, policies.get("agents", {}).get(policy_agent, policies.get("agents", {}).get(agent, {}))),
               ("stage", stage, policies.get("stages", {}).get(stage, {})),
               ("request", "", policies.get("request", {}))]

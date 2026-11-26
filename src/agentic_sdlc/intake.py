@@ -29,6 +29,34 @@ def accept(store, config, body, *, delivery_id, timestamp, signature):
     return store.enqueue_issue(delivery_id, hashlib.sha256(body).hexdigest(), issue)
 
 
+def accept_admin(store, config, body, signature):
+    """Authenticate Jira Cloud admin webhooks using a tenant-specific secret."""
+    from urllib.parse import urlsplit
+
+    policy = config.get("enterprise.intake.direct", {})
+    key = config.secret("enterprise.intake.direct.secret_env")
+    tenant = policy.get("tenant")
+    if policy.get("mode") != "jira_cloud_admin_hmac" or not key or len(key.encode()) < 32:
+        raise ValueError("Direct Jira authentication is unavailable")
+    if not 0 < len(body) <= 256_000 or not re.fullmatch(r"sha256=[a-f0-9]{64}", signature):
+        raise ValueError("Invalid direct Jira signature")
+    expected = "sha256=" + hmac.new(key.encode(), body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, signature):
+        raise ValueError("Invalid direct Jira signature")
+    event = json.loads(body)
+    issue = event["issue"]
+    link = urlsplit(issue["self"])
+    project = issue["key"].rsplit("-", 1)[0]
+    if (not isinstance(tenant, str) or not tenant or link.scheme != "https" or link.netloc != tenant
+            or issue["fields"]["project"]["key"] != project
+            or project not in config.get("enterprise.intake.projects", [])
+            or not re.fullmatch(r"[A-Z][A-Z0-9_]*-[1-9][0-9]*", issue["key"])
+            or event.get("webhookEvent") != "jira:issue_created"):
+        raise ValueError("Direct Jira tenant, project or event is ineligible")
+    digest = hashlib.sha256(body).hexdigest()
+    return store.enqueue_issue("jira-admin-" + digest, digest, issue["key"])
+
+
 def poll(store, config):
     from .jira import JiraClient
 
@@ -115,14 +143,17 @@ def relay_application(store, config):
                 start_response("200 OK", [("Content-Type", "application/json")])
                 return [b'{"status":"UP"}']
             length = int(environ.get("CONTENT_LENGTH") or 0)
-            if environ.get("REQUEST_METHOD") != "POST" or environ.get("PATH_INFO") != "/jira" or not 0 < length <= 256_000:
+            if environ.get("REQUEST_METHOD") != "POST" or environ.get("PATH_INFO") not in {"/jira", "/jira/direct"} or not 0 < length <= 256_000:
                 raise ValueError("Invalid webhook request")
             body = environ["wsgi.input"].read(length)
             if len(body) != length:
                 raise ValueError("Incomplete webhook request")
-            accept(store, config, body, delivery_id=environ.get("HTTP_X_CAPSTONE_DELIVERY", ""),
-                   timestamp=environ.get("HTTP_X_CAPSTONE_TIMESTAMP", ""),
-                   signature=environ.get("HTTP_X_CAPSTONE_SIGNATURE", ""))
+            if environ["PATH_INFO"] == "/jira/direct":
+                accept_admin(store, config, body, environ.get("HTTP_X_HUB_SIGNATURE", ""))
+            else:
+                accept(store, config, body, delivery_id=environ.get("HTTP_X_CAPSTONE_DELIVERY", ""),
+                       timestamp=environ.get("HTTP_X_CAPSTONE_TIMESTAMP", ""),
+                       signature=environ.get("HTTP_X_CAPSTONE_SIGNATURE", ""))
         except (KeyError, TypeError, ValueError, UnicodeError):
             start_response("400 Bad Request", [("Content-Type", "text/plain")])
             return [b"Rejected Jira delivery"]
@@ -192,8 +223,10 @@ def renewal_tick(store, config, *, now=None):
         return {"status": "COMPLETED", "registrations": results}
 
 
-def serve(store, config):
+def serve(store, config, *, drain=None):
     """Run behind an operator-managed TLS reverse proxy; no live registration."""
+    from logging import getLogger
+    from threading import Event, Thread
     from wsgiref.simple_server import make_server
 
     policy = config.get("enterprise.intake.hosted", {})
@@ -202,5 +235,36 @@ def serve(store, config):
     host, port = policy.get("host", "127.0.0.1"), policy.get("port", 8787)
     if host not in {"127.0.0.1", "::1"} or type(port) is not int or not 1024 <= port <= 65535:
         raise ValueError("Bind ingress to loopback behind an authenticated TLS reverse proxy")
+    services = []
+    if policy.get("drain_enabled") and drain is not None:
+        services.append(drain)
+    if policy.get("poll_enabled") and config.get("enterprise.intake.allow_poll", False):
+        services.append(lambda: poll(store, config))
+    if config.get("enterprise.intake.webhook.auto_renew", False):
+        services.append(lambda: renewal_tick(store, config))
+    interval = policy.get("worker_interval_seconds", 60)
+    if type(interval) is not int or not 5 <= interval <= 3600:
+        raise ValueError("Hosted intake worker interval must be between 5 and 3600 seconds")
+    stopping = Event()
+
+    def worker():
+        while not stopping.is_set():
+            for tick in services:
+                if stopping.is_set():
+                    break
+                try:
+                    tick()
+                except (KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
+                    getLogger(__name__).warning("Hosted Jira worker tick failed: %s", type(exc).__name__)
+            stopping.wait(interval)
+
     with make_server(host, port, relay_application(store, config)) as server:
-        server.serve_forever(poll_interval=0.5)
+        thread = Thread(target=worker, name="jira-intake-worker", daemon=True) if services else None
+        if thread:
+            thread.start()
+        try:
+            server.serve_forever(poll_interval=0.5)
+        finally:
+            stopping.set()
+            if thread:
+                thread.join(timeout=5)

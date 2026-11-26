@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -137,6 +138,10 @@ def _finding_records(findings):
 def review(store, run_id, authority, config, *, allow_provider=False):
     decision, evidence, identity = _artifact(store, run_id, authority)
     verification = _read_verification(store, run_id, authority, decision, identity, evidence)
+    if config.get("enterprise.delivery_policy.remote_ci.dispatch_ref"):
+        initial_ci = _delivery_attestation(store, run_id, authority, decision, identity, "ci_evidence")
+        if initial_ci is None:
+            raise ValueError("Complete initial trusted CI before review")
     previous = store.receipt(run_id, "review", optional=True)
     if previous:
         _, existing = _review(store, run_id, authority, decision, identity, evidence, allow_blocked=True)
@@ -226,6 +231,51 @@ def adjudicate_review(store, run_id, authority, actor, labels):
     return payload
 
 
+def local_review_evaluation(store, run_id, authority, config, actor):
+    """Evaluate the stored review with operator-controlled, artifact-specific labels."""
+    from .delivery_evidence import evaluate_review
+
+    if config.get("enterprise.delivery_policy.remote_ci.required", False):
+        raise ValueError("Local review evidence cannot satisfy required remote CI")
+    decision, evidence, identity = _artifact(store, run_id, authority)
+    _, review = _review(store, run_id, authority, decision, identity, evidence, allow_blocked=True)
+    saved = _local_review_receipt(store, run_id, authority, decision, identity, review)
+    if saved is not None:
+        return saved
+    folder = config.get("enterprise.delivery_policy.local_review.reference_dir")
+    if not folder:
+        return {"status": "NOT_EVALUATED", "reason": "No independent local review reference directory"}
+    root = Path(folder).resolve()
+    artifact = Path(evidence["artifact_dir"]).resolve()
+    frozen_source = evidence.get("inputs", {}).get("source")
+    if (root.is_relative_to(artifact.parent)
+            or (frozen_source and root.is_relative_to(Path(frozen_source).resolve()))):
+        raise ValueError("Keep local review references outside generated and evaluated workspaces")
+    path = root / (identity["manifest_sha256"] + ".json")
+    if not path.is_file():
+        return {"status": "NOT_EVALUATED", "reason": "Independent labels are unavailable for this artifact"}
+    if path.is_symlink() or path.stat().st_size > 1_000_000:
+        raise ValueError("Invalid local review reference")
+    authority.require_separation(actor, decision["actor"])
+    raw = path.read_bytes()
+    evaluation = evaluate_review(review, json.loads(raw), identity)
+    payload = {**identity, "attempt_id": evidence["attempt"], "review_sha256": _digest(review),
+               "reference_sha256": hashlib.sha256(raw).hexdigest(), "metrics": evaluation["metrics"],
+               "source": "LOCAL_INDEPENDENT_REVIEW", "status": "EVALUATED"}
+    store.record_receipt(run_id, "local_review_evidence", {
+        "actor": actor, "payload": payload,
+        "mac": authority.seal("verifiers", "local_review_evidence", actor, payload),
+    })
+    return payload
+
+
+def _local_review_receipt(store, run_id, authority, decision, identity, review):
+    receipt = _delivery_attestation(store, run_id, authority, decision, identity, "local_review_evidence")
+    if receipt is not None and receipt.get("review_sha256") != _digest(review):
+        raise ValueError("Local independent evaluation belongs to a stale review")
+    return receipt
+
+
 def _review(store, run_id, authority, decision, identity, evidence, *, allow_blocked=False):
     verification = _read_verification(store, run_id, authority, decision, identity, evidence)
     bundle = store.receipt(run_id, "review")
@@ -287,6 +337,102 @@ def approve_review(store, run_id, authority, actor, digest):
     return payload
 
 
+def export_ci_bundle(store, run_id, authority, output, *, include_review=False):
+    """Prepare an immutable directory from the active approved artifact."""
+    from .development import _snapshot
+
+    decision, evidence, identity = _artifact(store, run_id, authority)
+    source = Path(evidence["artifact_dir"]).resolve()
+    output = output.resolve()
+    if output.is_relative_to(source):
+        raise ValueError("CI output must be outside the development artifact")
+    review = _review(store, run_id, authority, decision, identity, evidence, allow_blocked=True)[1] if include_review else None
+    output.mkdir()
+    _snapshot(source / "integrated", output / "integrated")
+    (output / "manifest.json").write_bytes((source / "manifest.json").read_bytes())
+    verify_artifact({"artifact_dir": str(output), "manifest_sha256": identity["manifest_sha256"]})
+    members = {"specification.json": decision["draft"]}
+    if review is not None:
+        members["review.json"] = review
+    for name, payload in members.items():
+        (output / name).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return {**identity, "attempt": evidence["attempt"], "bundle": str(output),
+            "review_sha256": _digest(review) if review is not None else None}
+
+
+def submit_ci(store, run_id, authority, config, actor, *, include_review, authorized):
+    import tempfile
+    from contextlib import closing
+    from zipfile import ZIP_DEFLATED, ZipFile
+
+    from .development import _manifest
+    from .github_evidence import dispatch, monitor, publish_bundle
+
+    policy = config.get("enterprise.delivery_policy.remote_ci", {})
+    repository, workflow = policy["repository"], policy["workflow"]
+    ref, commit = policy["dispatch_ref"], policy["dispatch_commit"]
+    branch = config.get("github.bundle_branch", "")
+    if (not policy.get("required") or not re.fullmatch(r"[a-f0-9]{40}", commit)
+            or branch == ref or ref not in config.get("github.dispatch_refs", [])):
+        raise ValueError("Configure a distinct bundle branch and a pinned protected evaluator revision")
+    decision, evidence, binding = _artifact(store, run_id, authority)
+    authority.require_separation(actor, decision["actor"])
+    review = _review(store, run_id, authority, decision, binding, evidence, allow_blocked=True)[1] if include_review else None
+    if include_review and not store.receipt(run_id, "ci_evidence", optional=True):
+        raise ValueError("Complete initial CI evaluation before submitting review evidence")
+    record = {**binding, "repository": repository, "workflow": workflow, "commit": commit,
+              "development_attempt": evidence["attempt"], "review_sha256": _digest(review) if review is not None else None}
+    correlation = _digest(record)
+
+    def save(state):
+        with closing(store._connect()) as conn, conn:
+            conn.execute("INSERT INTO ci_submissions VALUES (?, ?, ?, ?) ON CONFLICT(run_id, correlation) "
+                         "DO UPDATE SET state=excluded.state, record=excluded.record",
+                         (run_id, correlation, state, json.dumps(record)))
+
+    with closing(store._connect()) as conn:
+        existing = conn.execute("SELECT state, record FROM ci_submissions WHERE run_id=? AND correlation=?",
+                                (run_id, correlation)).fetchone()
+    if existing:
+        if existing["state"] not in {"DISPATCHED", "COMPLETED"}:
+            raise ValueError("Uncertain CI publication or dispatch; reconcile before attempting replay")
+        record = json.loads(existing["record"])
+        if existing["state"] == "COMPLETED":
+            kind = record["receipt_kind"]
+            return _delivery_attestation(store, run_id, authority, decision, binding, kind)
+    else:
+        if not authorized or not config.get("github.allow_dispatch") or not config.get("github.allow_bundle_publication"):
+            raise ValueError("CI publication and dispatch require explicit authorization and enabled policy")
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle, path = Path(tmp) / "bundle", Path(tmp) / "input.zip"
+            export_ci_bundle(store, run_id, authority, bundle, include_review=include_review)
+            with ZipFile(path, "x", compression=ZIP_DEFLATED) as archive:
+                for member in _manifest(bundle):
+                    archive.write(bundle / member, member)
+            if path.stat().st_size > 10_000_000:
+                raise ValueError("CI bundle exceeds the publication limit")
+            data = path.read_bytes()
+        record.update(bundle_sha256=hashlib.sha256(data).hexdigest(), correlation=correlation)
+        save("PUBLISHING")
+        name = f"capstone-bundles/{correlation}.zip"
+        record["publication_commit"] = publish_bundle(config, repository, branch, name, data)
+        save("DISPATCHING")
+        selection = dispatch(config, repository, workflow, ref, {
+            "bundle": name, "bundle_ref": record["publication_commit"], "bundle_sha256": record["bundle_sha256"],
+            "manifest_sha256": binding["manifest_sha256"], "spec_sha256": binding["spec_sha256"],
+        }, exact=True)
+        record.update(ci_run_id=selection["run_id"], ci_attempt=selection["attempt"])
+        save("DISPATCHED")
+    fetched = monitor(store, run_id, config, {"run_id": record["ci_run_id"], "attempt": record["ci_attempt"], "commit": commit})
+    document = {**record, "run_id": fetched["run_id"], "attempt": fetched["attempt"], "workflow": fetched["workflow"],
+                "evaluator_revision": policy["evaluator_revision"],
+                "verified_archives": {row["name"]: row["digest"] for row in fetched["run_artifact_metadata"]}}
+    result = attest_delivery(store, run_id, authority, config, actor, "ci_evidence", document)
+    record["receipt_kind"] = "ci_review_evidence" if include_review else "ci_evidence"
+    save("COMPLETED")
+    return result
+
+
 def attest_delivery(store, run_id, authority, config, actor, kind, document, raw_directory=None):
     from .delivery_evidence import collect_measurements, validate_ci, verify_evaluator_archive
 
@@ -315,6 +461,18 @@ def attest_delivery(store, run_id, authority, config, actor, kind, document, raw
                 download_artifact(config, evidence, artifact["id"], archive_path)
                 if name == signed_archive:
                     authenticated = verify_evaluator_archive(config, policy, archive_path, document)
+        if document.get("bundle_sha256") and authenticated.get("bundle_sha256") != document["bundle_sha256"]:
+            raise ValueError("Evaluator signed a different published bundle")
+        review_evaluation = authenticated.get("review_evaluation")
+        if document.get("review_sha256") and (not review_evaluation
+                or review_evaluation.get("findings_sha256") != document["review_sha256"]):
+            raise ValueError("Required independent review evaluation is missing or stale")
+        if review_evaluation:
+            if store.receipt(run_id, "ci_evidence", optional=True):
+                kind = "ci_review_evidence"
+            candidate = store.receipt(run_id, "review", optional=True)
+            if candidate is None or _digest(candidate) != review_evaluation["findings_sha256"]:
+                raise ValueError("Trusted CI review evaluation does not match the stored review findings")
         value = {"github": evidence, "statement": document, "evaluator": authenticated}
     else:
         if document.get("manifest_sha256") != binding["manifest_sha256"]:
@@ -371,7 +529,31 @@ def validate(store, run_id, authority, *, persist=True, config=None, authorize_r
         if ci is None or not ci.get("evaluator") or result["environment"] != "LOCAL_ACTUAL":
             raise ValueError("Actual independently attested CI evidence is required for delivery")
         validate_ci(policy, ci["github"], {key: value for key, value in identity.items() if key != "run_id"}, ci["statement"])
+        if policy.get("dispatch_ref"):
+            review_ci = _delivery_attestation(store, run_id, authority, decision, identity, "ci_review_evidence")
+            if review_ci is None:
+                if not persist:
+                    return {**report, "status": "NOT_EVALUATED"}
+                raise ValueError("Complete independent CI review evaluation before delivery")
+            independent = review_ci["evaluator"].get("review_evaluation")
+            if not independent or independent.get("findings_sha256") != _digest(bundle):
+                raise ValueError("Independent CI review does not match the approved review")
+            validate_ci(policy, review_ci["github"], {key: value for key, value in identity.items() if key != "run_id"},
+                        review_ci["statement"])
         report["remote_ci"] = "GITHUB_ACTIONS_ACTUAL"
+    local_policy = config.get("enterprise.delivery_policy.local_review", {}) if config else {}
+    frozen_local = evidence.get("inputs", {}).get("local_review_policy_sha256")
+    if frozen_local and frozen_local != _digest(local_policy):
+        raise ValueError("Validation requires the original local review policy")
+    if not policy.get("required") and local_policy.get("required"):
+        local = _local_review_receipt(store, run_id, authority, decision, identity, bundle)
+        if local is None:
+            if not persist:
+                return {**report, "status": "NOT_EVALUATED"}
+            raise ValueError("Independent local review evidence is required before delivery")
+        local_record = store.receipt(run_id, "local_review_evidence")
+        authority.require_separation(local_record["actor"], approval["actor"])
+        report["local_review"] = local["source"]
     if result["environment"] == "LOCAL_ACTUAL":
         report = _post_approval_dev(store, run_id, authority, config, evidence, verification,
                                     approval, report, persist=persist)
@@ -397,9 +579,9 @@ def _remote_validation(store, run_id, authority, decision, identity, approval, c
     if receipt is None and not persist:
         return {**report, "status": "NOT_EVALUATED"}
     if receipt is None:
-        if not authorized:
-            raise ValueError("Remote DEV execution requires explicit --authorize-remote-dev")
         intent = store.receipt(run_id, "remote_dev_intent", optional=True)
+        if not intent and not authorized:
+            raise ValueError("Remote DEV execution requires explicit --authorize-remote-dev")
         binding = {**identity, "approval_sha256": _digest(approval),
                    "environment_policy_sha256": _digest(config.get("enterprise.remote_dev"))}
         if intent and intent != binding:
@@ -461,6 +643,19 @@ def scoring_inputs(store, run_id, authority, *, include_final=True, config=None)
         "actor": decision["actor"], "decided_at": decision["decided_at"],
     }}
     gates = {"requirements_approval": True}
+    if observed and config and not config.get("enterprise.delivery_policy.remote_ci.required", False):
+        review = store.receipt(run_id, "review", optional=True)
+        if review is not None:
+            local = _local_review_receipt(store, run_id, authority, decision, identity, review)
+            if local is not None:
+                receipts["local_review_evidence"] = local
+    if config and config.get("enterprise.delivery_policy.remote_ci.required", False):
+        ci = _delivery_attestation(store, run_id, authority, decision, identity, "ci_evidence")
+        if ci:
+            receipts["ci_evidence"] = ci
+        ci_review = _delivery_attestation(store, run_id, authority, decision, identity, "ci_review_evidence")
+        if ci_review:
+            receipts["ci_review_evidence"] = ci_review
     criteria = _delivery_attestation(store, run_id, authority, decision, identity, "criterion_evidence")
     if observed and criteria and config and criteria["rubric_version"] == config.get("evaluation.rubric.version"):
         receipts["criterion_evidence"] = criteria
@@ -474,6 +669,9 @@ def scoring_inputs(store, run_id, authority, *, include_final=True, config=None)
             independent_tests=all(checks[name] for name in ("acceptance", "regression", "generated", "quality", "definition_of_done")),
             security=checks["security"],
         )
+        ci_checks = receipts.get("ci_evidence", {}).get("evaluator", {}).get("checks", {})
+        if ci_checks.get("traceability") in {"PASSED", "FAILED"}:
+            checks["ci_traceability"] = ci_checks["traceability"] == "PASSED"
         if not checks["dev"]:
             gates["dev_validation"] = False
         if include_final and store.receipt(run_id, "review_approval", optional=True):

@@ -120,6 +120,8 @@ confluence:
 github:
   token_env: GITHUB_TOKEN
   allow_dispatch: false
+  allow_bundle_publication: false
+  bundle_branch: null
   dispatch_refs: []
 
 enterprise:
@@ -130,7 +132,14 @@ enterprise:
     key_env: CAPSTONE_JIRA_RELAY_KEY
     allow_poll: false
     retry_limit: 3
-    hosted: {enabled: false, host: 127.0.0.1, port: 8787}
+    hosted:
+      enabled: false
+      host: 127.0.0.1
+      port: 8787
+      drain_enabled: false
+      allow_provider: false
+      poll_enabled: false
+      worker_interval_seconds: 60
     webhook:
       allow_write: false
       auto_renew: false
@@ -147,12 +156,16 @@ enterprise:
     enabled: false
     page_ids: []
   budgets:
+    requirement: {}
     request: {}
     agents: {}
     stages: {}
     run: {}
     experiment: {}
   delivery_policy:
+    local_review:
+      required: false
+      reference_dir: null
     remote_ci:
       required: false
   remote_dev:

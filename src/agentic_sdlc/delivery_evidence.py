@@ -177,6 +177,14 @@ def verify_evaluator_archive(config, policy, archive_path, statement):
                 raise ValueError("CI archive needs exactly one bounded attestation.json entry")
             with archive.open(matches[0]) as stream:
                 record = json.loads(stream.read(100_001))
+            raw = None
+            raw_digest = record["payload"].get("raw_evidence_sha256")
+            if raw_digest or policy.get("required"):
+                entries = [item for item in archive.infolist() if item.filename == "raw-evidence.json"]
+                if len(entries) != 1 or entries[0].file_size > 1_000_000:
+                    raise ValueError("CI archive needs exactly one bounded raw-evidence.json entry")
+                with archive.open(entries[0]) as stream:
+                    raw = json.loads(stream.read(1_000_001))
     except (OSError, zipfile.BadZipFile) as exc:
         raise ValueError("CI evidence archive is invalid") from exc
     payload = record["payload"]
@@ -189,11 +197,65 @@ def verify_evaluator_archive(config, policy, archive_path, statement):
                 "evaluator_revision")
     if any(payload.get(name) != statement.get(name) for name in identity):
         raise ValueError("Trusted evaluator statement does not match the current artifact and CI attempt")
+    if raw is not None:
+        raw_signed = sign_evaluation(raw, {name: payload[name] for name in identity}, key)
+        if raw_signed["payload"] != payload:
+            raise ValueError("CI raw evidence differs from the signed evaluation")
     required = policy.get("checks", [])
     checks = payload.get("checks", {})
     if not required or any(checks.get(name) != "PASSED" for name in required):
         raise ValueError("Trusted evaluator did not report all required checks as passed")
     return payload
+
+
+def unpack_bundle(source, destination, expected):
+    """Extract a size-bounded bundle without links, traversal or duplicate entries."""
+    from pathlib import PurePosixPath
+
+    if not re.fullmatch(r"[a-f0-9]{64}", expected) or source.stat().st_size > 10_000_000:
+        raise ValueError("Invalid published CI bundle")
+    if hashlib.sha256(source.read_bytes()).hexdigest() != expected:
+        raise ValueError("Published CI bundle digest mismatch")
+    destination.mkdir()
+    with zipfile.ZipFile(source) as archive:
+        entries = archive.infolist()
+        if len(entries) > 10_000 or sum(entry.file_size for entry in entries) > 100_000_000:
+            raise ValueError("Published CI bundle exceeds extraction limits")
+        for entry in entries:
+            name = PurePosixPath(entry.filename)
+            if (not name.parts or name.is_absolute() or ".." in name.parts or ":" in entry.filename
+                    or chr(92) in entry.filename or entry.is_dir()
+                    or (name.parts[0] != "integrated" and str(name) not in
+                        {"manifest.json", "specification.json", "review.json"})):
+                raise ValueError("Unexpected CI bundle archive member")
+            target = destination.joinpath(*name.parts)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with target.open("xb") as output:
+                output.write(archive.read(entry))
+
+
+def evaluate_review(candidate, reference, identity):
+    from .metrics import independently_reviewed
+
+    if any(candidate.get(key) != identity[key] or reference.get(key) != identity[key]
+           for key in ("manifest_sha256", "spec_sha256")):
+        raise ValueError("Review evaluation belongs to a different artifact")
+    digest = hashlib.sha256(json.dumps(candidate, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    if reference.get("findings_sha256") != digest:
+        raise ValueError("Independent reference belongs to different review findings")
+    labels = reference["labels"]
+    findings = [{"id": row["id"], "origin": "ai",
+                 "adjudication": labels.get(row["id"], {}).get("adjudication", "unverified"),
+                 "defect_id": labels.get(row["id"], {}).get("defect_id")}
+                for row in candidate["findings"] if row.get("origin") == "ai"]
+    if labels.keys() - {row["id"] for row in findings}:
+        raise ValueError("Independent reference labels unknown findings")
+    metrics = independently_reviewed(reference["defects"], findings)
+    if not findings:
+        metrics["ai"] = {"tp": 0, "fp": 0, "fn": len(reference["defects"]), "unverified": 0,
+                         "derived": 0, "precision": None, "recall": 0.0 if reference["defects"] else None,
+                         "f1": 0.0 if reference["defects"] else None}
+    return {"findings_sha256": digest, "metrics": metrics}
 
 
 def evaluate_bundle(config, bundle, acceptance, identity):
@@ -208,14 +270,21 @@ def evaluate_bundle(config, bundle, acceptance, identity):
     specification = json.loads((bundle / "specification.json").read_text(encoding="utf-8"))
     if specification_digest(specification) != identity["spec_sha256"]:
         raise ValueError("CI specification does not match approved input")
-    records = DockerVerifier(config).run(bundle / "integrated", acceptance, identity, manifest["integrated"])
+    from pathlib import Path
+
+    tests = acceptance / "tests"
+    if not tests.is_dir() and (acceptance / "review-reference.json").exists():
+        raise ValueError("Keep independent review labels outside the acceptance test directory")
+    records = DockerVerifier(config).run(bundle / "integrated", tests if tests.is_dir() else Path(acceptance),
+                                         identity, manifest["integrated"])
     checks = {record["check_id"]: record["result"] for record in records}
     guard = DevelopmentGuardrails(config)
     violations = []
     for name, digest in manifest["integrated"].items():
         if manifest["baseline"].get(name) != digest:
             violations.extend(guard.check_write(bundle / "integrated", name,
-                              (bundle / "integrated" / name).read_text(encoding="utf-8")))
+                              (bundle / "integrated" / name).read_text(encoding="utf-8"),
+                              tests_only=guard.is_test_path(name)))
     # Deletions must be represented and checked as writes too.
     for name in manifest["baseline"].keys() - manifest["integrated"].keys():
         violations.extend(guard.check_write(bundle / "integrated", name, ""))
@@ -223,7 +292,14 @@ def evaluate_bundle(config, bundle, acceptance, identity):
     criteria = specification.get("acceptance_criteria", [])
     trace = specification.get("traceability", {})
     checks["traceability"] = "PASSED" if criteria and all(row["id"] in trace for row in criteria) else "FAILED"
-    return {"payload": {**identity, "checks": checks, "source": "GITHUB_ACTIONS_ACTUAL"}, "records": records,
+    review = None
+    reference = acceptance / "review-reference.json"
+    if reference.is_file():
+        candidate = bundle / "review.json"
+        if candidate.is_file():
+            review = evaluate_review(json.loads(candidate.read_text(encoding="utf-8")),
+                                     json.loads(reference.read_text(encoding="utf-8")), identity)
+    return {"payload": {**identity, "checks": checks, "source": "GITHUB_ACTIONS_ACTUAL", "review_evaluation": review}, "records": records,
             "guardrail_violations": [{"rule": row.rule, "path": row.path} for row in violations]}
 
 
@@ -268,6 +344,8 @@ def _producer_main():
     args = parser.parse_args()
     identity = {name: os.environ["CI_" + name.upper()] for name in (
         "repository", "workflow", "commit", "evaluator_revision", "manifest_sha256", "spec_sha256")}
+    if os.environ.get("CI_BUNDLE_SHA256"):
+        identity["bundle_sha256"] = os.environ["CI_BUNDLE_SHA256"]
     identity.update(run_id=int(os.environ["GITHUB_RUN_ID"]), attempt=int(os.environ["GITHUB_RUN_ATTEMPT"]))
     if args.operation == "evaluate":
         result = evaluate_bundle(Config.load(args.config), args.bundle, args.acceptance, identity)
