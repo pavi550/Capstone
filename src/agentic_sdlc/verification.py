@@ -366,7 +366,8 @@ def submit_ci(store, run_id, authority, config, actor, *, include_review, author
     from zipfile import ZIP_DEFLATED, ZipFile
 
     from .development import _manifest
-    from .github_evidence import dispatch, monitor, publish_bundle
+    from .github_evidence import dispatch, monitor, publish_bundle, reconcile_dispatch
+    from .lifecycle import record_reconciliation
 
     policy = config.get("enterprise.delivery_policy.remote_ci", {})
     repository, workflow = policy["repository"], policy["workflow"]
@@ -394,15 +395,23 @@ def submit_ci(store, run_id, authority, config, actor, *, include_review, author
         existing = conn.execute("SELECT state, record FROM ci_submissions WHERE run_id=? AND correlation=?",
                                 (run_id, correlation)).fetchone()
     if existing:
-        if existing["state"] not in {"DISPATCHED", "COMPLETED"}:
-            raise ValueError("Uncertain CI publication or dispatch; reconcile before attempting replay")
         record = json.loads(existing["record"])
+        if existing["state"] == "DISPATCHING":
+            recovered = reconcile_dispatch(config, repository, workflow, commit, correlation)
+            if recovered is None:
+                record_reconciliation("CI_DISPATCH_NOT_CONFIRMED", "UNCERTAIN")
+                raise ValueError("CI dispatch outcome remains uncertain; automatic replay is blocked")
+            record.update(ci_run_id=recovered["run_id"], ci_attempt=recovered["attempt"])
+            save("DISPATCHED")
+            record_reconciliation("CI_DISPATCH_BOUND", "CONFIRMED")
+        elif existing["state"] not in {"DISPATCHED", "COMPLETED"}:
+            raise ValueError("Uncertain CI publication; reconcile before attempting replay")
         if existing["state"] == "COMPLETED":
             kind = record["receipt_kind"]
             return _delivery_attestation(store, run_id, authority, decision, binding, kind)
     else:
         if not authorized or not config.get("github.allow_dispatch") or not config.get("github.allow_bundle_publication"):
-            raise ValueError("CI publication and dispatch require explicit authorization and enabled policy")
+            raise PermissionError("CI publication and dispatch require explicit authorization and enabled policy")
         with tempfile.TemporaryDirectory() as tmp:
             bundle, path = Path(tmp) / "bundle", Path(tmp) / "input.zip"
             export_ci_bundle(store, run_id, authority, bundle, include_review=include_review)
@@ -418,7 +427,7 @@ def submit_ci(store, run_id, authority, config, actor, *, include_review, author
         record["publication_commit"] = publish_bundle(config, repository, branch, name, data)
         save("DISPATCHING")
         selection = dispatch(config, repository, workflow, ref, {
-            "bundle": name, "bundle_ref": record["publication_commit"], "bundle_sha256": record["bundle_sha256"],
+            "correlation": correlation, "bundle": name, "bundle_ref": record["publication_commit"], "bundle_sha256": record["bundle_sha256"],
             "manifest_sha256": binding["manifest_sha256"], "spec_sha256": binding["spec_sha256"],
         }, exact=True)
         record.update(ci_run_id=selection["run_id"], ci_attempt=selection["attempt"])
@@ -670,8 +679,10 @@ def scoring_inputs(store, run_id, authority, *, include_final=True, config=None)
             security=checks["security"],
         )
         ci_checks = receipts.get("ci_evidence", {}).get("evaluator", {}).get("checks", {})
-        if ci_checks.get("traceability") in {"PASSED", "FAILED"}:
-            checks["ci_traceability"] = ci_checks["traceability"] == "PASSED"
+        for criterion, check in (("traceability", "traceability"), ("path_policy", "guardrails"),
+                                 ("security", "security"), ("correctness", "acceptance")):
+            if ci_checks.get(check) in {"PASSED", "FAILED"}:
+                checks["ci_" + criterion] = ci_checks[check] == "PASSED"
         if not checks["dev"]:
             gates["dev_validation"] = False
         if include_final and store.receipt(run_id, "review_approval", optional=True):

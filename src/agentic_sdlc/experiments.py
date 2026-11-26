@@ -118,6 +118,8 @@ def _managed_measurement(directory, manifest, trial):
     human_kinds = snapshot["human_effort"].get("measured_seconds_by_kind", {})
     review_receipt = receipts.get("ci_review_evidence") or receipts.get("ci_evidence") or {}
     review_metrics = ((review_receipt.get("payload") or {}).get("evaluator", {}).get("review_evaluation") or {}).get("metrics")
+    ci_timing = {kind: row["payload"]["github"].get("timing") for kind in ("ci_evidence", "ci_review_evidence")
+                 if (row := receipts.get(kind)) and row.get("payload", {}).get("github")}
     if review_metrics is None:
         review_metrics = ((receipts.get("local_review_evidence") or {}).get("payload") or {}).get("metrics")
     return {**{key: manifest["plan"][key] for key in
@@ -132,7 +134,7 @@ def _managed_measurement(directory, manifest, trial):
             "correction_attempts": snapshot.get("correction_attempts"),
             "guardrail_events": snapshot.get("guardrail_events"),
             "test_outcomes": (receipts.get("actual_verification") or {}).get("payload", {}).get("checks"),
-            "dev_validation_status": validation.get("status"),
+            "dev_validation_status": validation.get("status"), "ci_timing": ci_timing or None,
             "provider_tokens": sum(provider_tokens) if None not in provider_tokens else None,
             "estimated_provider_cost": provider_cost,
             "provider_cost_currency": next(iter(currencies)) if provider_cost is not None else None,
@@ -191,7 +193,7 @@ def export_report(directory, report):
     fields = ("trial", "mode", "status", "delivery_seconds", "human_seconds", "provider_tokens",
               "estimated_provider_cost", "aggregate_agent_seconds", "approval_wait_seconds",
               "human_active_seconds_by_kind", "first_pass_quality", "final_quality", "review_metrics",
-              "correction_attempts", "guardrail_events", "test_outcomes", "dev_validation_status",
+              "correction_attempts", "guardrail_events", "test_outcomes", "dev_validation_status", "ci_timing",
               "missing_evidence", "comparison")
     rows = []
     for trial in report["trials"]:

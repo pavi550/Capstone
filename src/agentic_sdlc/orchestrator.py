@@ -495,6 +495,16 @@ def continue_enterprise(store, run_id, plan, *, allow_provider=False, allow_ci=F
         args.dev_command = name
         return stage(name, lambda: handler(args))
 
+    def ci_allowed(include_review):
+        if allow_ci:
+            return True
+        review = receipt("review") if include_review else None
+        digest = verification._digest(review) if review is not None else None
+        with closing(store._connect()) as conn:
+            rows = conn.execute("SELECT record FROM ci_submissions WHERE run_id=? "
+                                "AND state IN ('DISPATCHING', 'DISPATCHED', 'COMPLETED')", (run_id,)).fetchall()
+        return any(json.loads(row["record"]).get("review_sha256") == digest for row in rows)
+
     def drive():
         directory = Path(plan["experiment"]) if plan.get("experiment") else None
         trial = plan.get("trial")
@@ -547,7 +557,7 @@ def continue_enterprise(store, run_id, plan, *, allow_provider=False, allow_ci=F
             review = receipt("review")
             if verified["status"] == "PASSED":
                 if remote_ci and not receipt("ci_evidence"):
-                    if not allow_ci:
+                    if not ci_allowed(False):
                         return progress("ci-initial", "PAUSED", reason="Authorize trusted CI submission on resume")
                     stage("ci-initial", lambda: verification.submit_ci(
                         store, run_id, authority, config, args.actor, include_review=False, authorized=allow_ci,
@@ -555,7 +565,7 @@ def continue_enterprise(store, run_id, plan, *, allow_provider=False, allow_ci=F
                 if review is None:
                     review = call("review", _dev_verification)
                 if remote_ci and not receipt("ci_review_evidence"):
-                    if not allow_ci:
+                    if not ci_allowed(True):
                         return progress("ci-review", "PAUSED", reason="Authorize independent CI review on resume")
                     stage("ci-review", lambda: verification.submit_ci(
                         store, run_id, authority, config, args.actor, include_review=True, authorized=allow_ci,

@@ -13,6 +13,7 @@ def reserve(context, config, agent, input_bound, output_bound, rates):
             raise ValueError("A budgeted model request requires a stored lifecycle stage")
         return None
     store, run_id, stage, attempt = context
+    journal_stage = stage
     parts = stage.split("/")
     stage = parts[2] if parts[0] == "workflow" and len(parts) > 2 else parts[0]
     policy_agent = {"test": "testcase", "code": "coding", "requirement": "requirements"}.get(agent, agent)
@@ -61,6 +62,7 @@ def reserve(context, config, agent, input_bound, output_bound, rates):
         connection.execute("INSERT INTO provider_requests VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 'RESERVED')",
                            (identity, run_id, stage, attempt, agent, config.get("llm.provider"), config.get("llm.model"),
                             input_bound, output_bound or 0, price))
+        connection.execute("INSERT INTO provider_request_ownership VALUES (?, ?)", (identity, journal_stage))
     return store, identity
 
 

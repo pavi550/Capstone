@@ -10,6 +10,31 @@ from urllib.parse import urlsplit
 from .httpclient import HttpError, _NoRedirect, request_json
 
 
+def execution_timing(run, jobs, attempt):
+    def stamp(value):
+        if not isinstance(value, str):
+            return None
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo is not None else None
+
+    # The original creation timestamp cannot measure the queue of a rerun.
+    queued = stamp(run.get("created_at")) if attempt == 1 else None
+    started = stamp(run.get("run_started_at"))
+    ends = [stamp(job.get("completed_at")) for job in jobs]
+    ended = max(ends) if ends and all(value is not None for value in ends) else None
+
+    def elapsed(first, last):
+        return (last - first).total_seconds() if first and last and last >= first else None
+
+    return {"queued_at": queued.isoformat() if queued else None,
+            "started_at": started.isoformat() if started else None,
+            "last_job_completed_at": ended.isoformat() if ended else None,
+            "queue_seconds": elapsed(queued, started), "execution_seconds": elapsed(started, ended)}
+
+
 def collect(config, repository, run_id, attempt, commit, workflow):
     if not re.fullmatch(r"[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+", repository) or any(
         part in {".", ".."} for part in repository.split("/")
@@ -64,7 +89,7 @@ def collect(config, repository, run_id, attempt, commit, workflow):
         "observed_at": datetime.now(UTC).isoformat(),
         "jobs": [{key: job.get(key) for key in ("id", "name", "status", "conclusion", "started_at", "completed_at")}
                  for job in jobs],
-        "run_artifact_metadata": artifacts,
+        "run_artifact_metadata": artifacts, "timing": execution_timing(run, jobs, attempt),
     }
 
 
@@ -149,6 +174,32 @@ def dispatch(config, repository, workflow, ref, inputs, *, exact=False):
             raise ValueError("GitHub did not confirm a run ID; reconcile the dispatch before retrying")
         return {"run_id": run, "attempt": 1}
     return {"status": "DISPATCH_REQUESTED", "repository": repository, "workflow": workflow, "ref": ref}
+
+
+def reconcile_dispatch(config, repository, workflow, commit, correlation):
+    """Read-only recovery. An absent or ambiguous result never authorizes dispatch."""
+    if (not re.fullmatch(r"[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+", repository)
+            or any(part in {".", ".."} for part in repository.split("/"))
+            or not re.fullmatch(r"[A-Za-z0-9_.-]+\.ya?ml", workflow)
+            or not re.fullmatch(r"[a-f0-9]{40}", commit)
+            or not re.fullmatch(r"[a-f0-9]{64}", correlation)):
+        raise ValueError("Invalid persisted dispatch identity")
+    token = config.secret("github.token_env")
+    if not token:
+        raise ValueError("Configure Actions read access to reconcile dispatch")
+    endpoint = f"https://api.github.com/repos/{repository}/actions/workflows/{workflow}/runs"
+    rows = request_json("GET", f"{endpoint}?event=workflow_dispatch&head_sha={commit}&per_page=100",
+                        headers={"Authorization": f"Bearer {token}"})
+    runs = rows["workflow_runs"]
+    if rows["total_count"] != len(runs):
+        return None
+    matches = [run for run in runs if run.get("display_title") == correlation and run.get("head_sha") == commit
+               and run.get("event") == "workflow_dispatch"
+               and (run.get("head_repository") or {}).get("full_name", "").casefold() == repository.casefold()
+               and str(run.get("path", "")).partition("@")[0] == f".github/workflows/{workflow}"]
+    if len(matches) != 1 or type(matches[0].get("id")) is not int or matches[0]["id"] < 1:
+        return None
+    return {"run_id": matches[0]["id"], "attempt": 1}
 
 
 def publish_bundle(config, repository, branch, name, archive):

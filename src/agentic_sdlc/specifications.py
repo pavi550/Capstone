@@ -64,6 +64,10 @@ class SpecificationStore:
                     charged_input INTEGER NOT NULL, charged_output INTEGER NOT NULL, charged_cost INTEGER,
                     actual_input INTEGER, actual_output INTEGER, state TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS provider_request_ownership (
+                    request_id TEXT PRIMARY KEY REFERENCES provider_requests(request_id),
+                    stage TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS experiment_runs (
                     experiment_id TEXT NOT NULL, trial_id TEXT NOT NULL,
                     run_id TEXT NOT NULL UNIQUE REFERENCES specifications(run_id),
@@ -104,6 +108,10 @@ class SpecificationStore:
                     reason TEXT NOT NULL, artifact_integrity TEXT NOT NULL,
                     external_status TEXT NOT NULL, action TEXT NOT NULL,
                     decided_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS lifecycle_recovery_timing (
+                    recovery_id TEXT PRIMARY KEY REFERENCES lifecycle_recovery(recovery_id),
+                    assessment_seconds REAL NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS lifecycle_intervals (
                     run_id TEXT NOT NULL, stage TEXT NOT NULL, attempt INTEGER NOT NULL,

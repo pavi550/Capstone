@@ -193,6 +193,35 @@ bounded correction, reevaluation, post-approval validation, scoring and report
 generation. The basic routing is implemented. Live and comprehensive
 verification, advanced recovery and exhaustive evidence collection are pending.
 
+## Phase 2 checkpoint
+
+CI evidence preserves observed queue and execution timing. A rerun queue is
+unavailable when GitHub supplies only the original creation timestamp. Local
+recovery assessments record elapsed time. Lost dispatch responses can be
+reconciled by exact correlation, repository, workflow and revision using read
+access. Missing or ambiguous results block replay. Hosted and manual intake
+drains share a process-owned SQLite lock.
+
+Next resume at WS-1-006. Cancellation during blocked DNS, connection and
+header operations still depends on transport behavior. WS-1-007 also needs
+durable ownership for abandoned subprocesses. Five focused tests, Ruff,
+compilation and whitespace checks passed. Comprehensive verification remains pending.
+
+## Cross-workstream closure checkpoint
+
+Blocked read-only HTTP observations release the workflow on cancellation or
+deadline. An in-flight system read can remain active until the transport
+returns, so full resource termination remains partial. Abandoned provider
+reservations are tied to their exact journal stage and marked uncertain while
+retaining their original charges. All Jira draft entry points share one
+process-owned worker lock. Authenticated CI acceptance, security and guardrail
+results feed existing criteria when available.
+
+Next resume at WS-1-006 and WS-1-007. Complete cancellation of the actual
+transport and durable subprocess ownership after supervisor death. Other
+mandatory gaps remain in the matrix. Five focused tests, Ruff, compilation
+and Git whitespace checks passed. Comprehensive verification remains pending.
+
 ## Closure pass ? 26 November 2026
 
 **Implementation remains incomplete. Comprehensive verification remains deferred.**

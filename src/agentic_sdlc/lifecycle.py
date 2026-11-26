@@ -71,6 +71,7 @@ def _lock_path(store, run_id):
 
 def _recover_owned(connection, run_id):
     """Call only while holding the exclusive run lock."""
+    started = monotonic()
     stamp = datetime.now(UTC).isoformat()
     active = connection.execute(
         "SELECT stage, attempt FROM lifecycle_stages WHERE run_id=? AND state='RUNNING'", (run_id,),
@@ -85,7 +86,14 @@ def _recover_owned(connection, run_id):
         connection.execute("INSERT INTO lifecycle_recovery VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", row)
         connection.execute("UPDATE lifecycle_stages SET state='INTERRUPTED', failure='PROCESS_INTERRUPTED' "
                            "WHERE run_id=? AND stage=? AND attempt=?", (run_id, stage, attempt))
-        decisions.append({"stage": stage, "attempt": attempt, "action": action})
+        connection.execute(
+            "UPDATE provider_requests SET state='INTERRUPTED_UNKNOWN' WHERE run_id=? AND attempt=? "
+            "AND state='RESERVED' AND request_id IN (SELECT request_id FROM provider_request_ownership WHERE stage=?)",
+            (run_id, attempt, stage),
+        )
+        elapsed = monotonic() - started
+        connection.execute("INSERT INTO lifecycle_recovery_timing VALUES (?, ?)", (row[0], elapsed))
+        decisions.append({"stage": stage, "attempt": attempt, "action": action, "assessment_seconds": elapsed})
     return decisions
 
 
@@ -114,7 +122,8 @@ def recover(store):
 def recovery_history(store, run_id):
     with closing(store._connect()) as connection:
         return [dict(row) for row in connection.execute(
-            "SELECT * FROM lifecycle_recovery WHERE run_id=? ORDER BY rowid", (run_id,),
+            "SELECT r.*, t.assessment_seconds FROM lifecycle_recovery r LEFT JOIN lifecycle_recovery_timing t "
+            "USING(recovery_id) WHERE run_id=? ORDER BY r.rowid", (run_id,),
         )]
 
 

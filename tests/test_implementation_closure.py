@@ -691,3 +691,95 @@ def test_unified_workflow_pauses_at_both_approvals_and_orders_ci(tmp_path, monke
     assert result["status"] == "LOCAL_DEV_VALIDATED"
     assert calls[-1] == "validate"
     assert calls.count("testing") == 1
+
+
+def test_ci_timing_keeps_unavailable_rerun_queue_explicit():
+    from agentic_sdlc.github_evidence import execution_timing
+
+    run = {"created_at": "2026-01-01T10:00:00Z", "run_started_at": "2026-01-01T10:02:00Z"}
+    jobs = [{"completed_at": "2026-01-01T10:05:00Z"}, {"completed_at": "2026-01-01T10:06:00Z"}]
+    assert execution_timing(run, jobs, 1)["queue_seconds"] == 120
+    assert execution_timing(run, jobs, 1)["execution_seconds"] == 240
+    assert execution_timing(run, jobs, 2)["queue_seconds"] is None
+    assert execution_timing(run, [{"completed_at": None}], 1)["execution_seconds"] is None
+
+
+def test_intake_drain_respects_existing_worker_lock(tmp_path):
+    import sqlite3
+    from argparse import Namespace
+
+    from agentic_sdlc.cli import _drain_intake
+
+    store, _ = store_run(tmp_path)
+    lock_path = store.path.with_name(f".{store.path.name}.intake-worker.lock")
+    with closing(sqlite3.connect(lock_path)) as lock:
+        lock.execute("BEGIN EXCLUSIVE")
+        assert _drain_intake(store, Namespace())["status"] == "ALREADY_RUNNING"
+
+
+def test_ci_dispatch_recovery_matches_exact_correlation_and_rejects_ambiguity(monkeypatch):
+    from agentic_sdlc import github_evidence
+
+    monkeypatch.setenv("TEST_RECONCILE_TOKEN", "fixture")
+    cfg = Config.load(overrides={"github": {"token_env": "TEST_RECONCILE_TOKEN"}})
+    commit, correlation = "a" * 40, "b" * 64
+    run = {"id": 8, "head_sha": commit, "display_title": correlation, "event": "workflow_dispatch",
+           "head_repository": {"full_name": "owner/repo"}, "path": ".github/workflows/evaluator.yml@main"}
+    runs = [{**run, "id": 9, "display_title": "unrelated"}, run]
+
+    def request(method, *_args, **_kwargs):
+        assert method == "GET"
+        return {"workflow_runs": runs, "total_count": len(runs)}
+
+    monkeypatch.setattr(github_evidence, "request_json", request)
+    assert github_evidence.reconcile_dispatch(cfg, "owner/repo", "evaluator.yml", commit, correlation) == {
+        "run_id": 8, "attempt": 1,
+    }
+    runs.append({**run, "id": 10})
+    assert github_evidence.reconcile_dispatch(cfg, "owner/repo", "evaluator.yml", commit, correlation) is None
+
+
+def test_abandoned_provider_reservation_remains_charged(tmp_path):
+    store, run = store_run(tmp_path)
+    cfg = Config.load()
+    with closing(store._connect()) as conn, conn:
+        conn.execute("INSERT INTO lifecycle_stages VALUES (?, 'run/1/implement', 1, ?, NULL, 'RUNNING', NULL, NULL)",
+                     (run, "2026-01-01T00:00:00+00:00"))
+    reserve((store, run, "run/1/implement", 1), cfg, "code", 12, 7, (None, None))
+    lifecycle.recover(store)
+    request = store.provider_requests(run)[0]
+    assert request["state"] == "INTERRUPTED_UNKNOWN"
+    assert request["charged_input"] == 12
+    assert request["charged_output"] == 7
+
+
+def test_blocked_http_header_observation_honors_cancel(tmp_path, monkeypatch):
+    from threading import Event
+
+    from agentic_sdlc import httpclient
+
+    store, run = store_run(tmp_path)
+    entered, release = Event(), Event()
+
+    def blocked(*_args, **_kwargs):
+        entered.set()
+        assert release.wait(5)
+        raise TimeoutError("fixture released")
+
+    monkeypatch.setattr(httpclient.urllib.request, "urlopen", blocked)
+
+    def request():
+        with ThreadPoolExecutor(1) as pool:
+            def cancel():
+                assert entered.wait(5)
+                store.cancel(run)
+
+            pending = pool.submit(cancel)
+            try:
+                return httpclient.request_json("GET", "https://fixture.invalid")
+            finally:
+                pending.result()
+                release.set()
+
+    with pytest.raises(lifecycle.StageCancelled):
+        lifecycle.execute(store, run, "testing", request)

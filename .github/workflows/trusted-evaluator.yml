@@ -1,7 +1,11 @@
 name: Protected enterprise evaluator
+run-name: ${{ inputs.correlation || github.workflow }}
 on:
   workflow_call:
     inputs:
+      correlation:
+        required: false
+        type: string
       bundle:
         required: true
         type: string
@@ -19,6 +23,9 @@ on:
         default: ''
   workflow_dispatch:
     inputs:
+      correlation:
+        required: false
+        type: string
       bundle:
         required: true
         type: string

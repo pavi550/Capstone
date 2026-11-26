@@ -177,7 +177,8 @@ def _lifecycle_assessment(store, run_id, cfg, directory, *, include_final=True):
                 "reason": "Recorded independent check result", "evidence": ref,
             }
             for name, check in (("regression", "regression"), ("definition_of_done", "definition_of_done"),
-                                ("traceability", "ci_traceability"))
+                                ("traceability", "ci_traceability"), ("path_policy", "ci_path_policy"),
+                                ("security", "ci_security"), ("correctness", "ci_correctness"))
             if check in checks},
         },
         "gates": {name: {"passed": passed, "evidence": ref} for name, passed in gates.items()},
@@ -488,6 +489,33 @@ def _dev_intake(args):
 
         return {"deliveries": poll(store, Config.load(args.config, enterprise_intake=True))}
     if args.dev_command == "intake-drain":
+        return _drain_intake(store, args)
+    if args.dev_command == "intake-draft":
+        return _drain_intake(store, args, delivery_id=args.delivery_id)
+    from .intake import accept
+
+    with args.payload.open("rb") as stream:
+        return accept(store, Config.load(args.config), stream.read(256_001), delivery_id=args.delivery_id,
+                      timestamp=args.timestamp, signature=args.signature)
+
+
+def _drain_intake(store, args, *, delivery_id=None):
+    from contextlib import closing
+
+    lock_path = store.path.with_name(f".{store.path.name}.intake-worker.lock")
+    with closing(sqlite3.connect(lock_path, timeout=0)) as lock:
+        try:
+            lock.execute("BEGIN EXCLUSIVE")
+        except sqlite3.OperationalError as exc:
+            if exc.sqlite_errorcode != sqlite3.SQLITE_BUSY:
+                raise
+            return {"status": "ALREADY_RUNNING", "drafted": [], "failed": []}
+        if delivery_id is not None:
+            event = next((row for row in store.intake_queue() if row["delivery_id"] == args.delivery_id), None)
+            if event is None:
+                raise ValueError("No queued Jira delivery matches that ID")
+            args.issue, args.page_id, args.criteria_file = event["issue"], None, None
+            return _dev_spec(args)
         if not 1 <= args.limit <= 20:
             raise ValueError("Intake drain limit must be between 1 and 20")
         results, failures = [], []
@@ -508,17 +536,6 @@ def _dev_intake(args):
             results.append({"run_id": result["run_id"], "issue": event["issue"],
                             "status": result["draft"]["status"]})
         return {"drafted": results, "failed": failures}
-    if args.dev_command == "intake-draft":
-        event = next((row for row in store.intake_queue() if row["delivery_id"] == args.delivery_id), None)
-        if event is None:
-            raise ValueError("No queued Jira delivery matches that ID")
-        args.issue, args.page_id, args.criteria_file = event["issue"], None, None
-        return _dev_spec(args)
-    from .intake import accept
-
-    with args.payload.open("rb") as stream:
-        return accept(store, Config.load(args.config), stream.read(256_001), delivery_id=args.delivery_id,
-                      timestamp=args.timestamp, signature=args.signature)
 
 
 def _dev_ci_evidence(args):
