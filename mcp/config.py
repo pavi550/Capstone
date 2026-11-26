@@ -21,7 +21,7 @@ class ConfigurationError(RuntimeError):
 def settings(path: Path | None = None, environ: Mapping[str, str] | None = None):
     try:
         local = dotenv_values(
-            path if path is not None else ENV_FILE, encoding="utf-8-sig", interpolate=False,
+            path if path is not None else os.environ.get("CAPSTONE_ENV_FILE") or ENV_FILE, encoding="utf-8-sig", interpolate=False,
         )
     except (OSError, UnicodeError):
         raise ConfigurationError("Could not read the repository .env file as UTF-8.") from None

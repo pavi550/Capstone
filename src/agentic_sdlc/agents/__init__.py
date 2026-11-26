@@ -28,6 +28,11 @@ def read_files(repo: Path, paths: list[str], max_chars: int = 20000) -> dict[str
     out = {}
     for rel in paths:
         p = repo / rel
+        parts = Path(rel.replace("\\", "/")).parts
+        if (not p.resolve().is_relative_to(repo.resolve()) or p.is_symlink()
+                or any(part.casefold() in {".git", ".github", ".ssh", ".aws", "secrets", "trusted_tests", "evaluation"}
+                       or part.casefold().startswith(".env") for part in parts)):
+            raise ValueError("Repository read is outside the authorized source boundary")
         if p.is_file():
             out[rel] = p.read_text(encoding="utf-8", errors="replace")[:max_chars]
     return out

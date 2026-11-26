@@ -863,7 +863,16 @@ Use `dev backlog`, `dev spec`, `dev context`, `dev score`, and `dev compare`
 for the new read-only intake and independent evaluation commands. The
 [implementation checklist and offline reproduction guide](docs/enterprise-implementation.md)
 records current coverage, commands, and remaining work.
-The guide also documents the approval-gated offline development demo.
+The guide documents both the offline approval demo and the local Docker
+verification fixture. The setup wizard saves Jira and Confluence settings in
+the ignored `.env` file. From the repository root, run
+`python -m agentic_sdlc dev backlog` or `python -m agentic_sdlc dev context PAGE_ID`.
+If you ran setup before it saved a backlog query, run the Jira setup
+again or add `JIRA_JQL` to your existing `.env`. Use `dev spec ISSUE --store DB
+--allow-provider` to add advisory analysis from a configured OpenAI-compatible
+loopback model before requesting requirement approval. Add `--page-id ID` for
+each authorized Confluence page. A reported mandatory gap blocks the draft,
+and Jira acceptance criteria retain their original IDs and text.
 
 ### Live integrations
 

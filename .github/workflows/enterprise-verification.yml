@@ -1,0 +1,29 @@
+name: Trusted enterprise verification fixture
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docker-verification:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e .
+      - name: Build verifier image from trusted workflow source
+        run: docker build --tag capstone-trusted-verifier examples/enterprise/verifier-image
+      - name: Run positive and negative acceptance fixtures
+        shell: pwsh
+        run: |
+          $image = docker image inspect capstone-trusted-verifier --format '{{.Id}}'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./examples/enterprise/demo-actual.ps1 -Image $image -FixtureApprovals
+          ./examples/enterprise/demo-actual.ps1 -Image $image -FixtureApprovals -FailAcceptance

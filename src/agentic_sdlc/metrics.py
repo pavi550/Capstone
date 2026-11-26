@@ -113,6 +113,20 @@ def guardrail_effectiveness(observations: list[dict]) -> dict:
     return result
 
 
+def guardrail_breakdown(observations):
+    aggregate = guardrail_effectiveness(observations)
+    policies, severities = {}, {}
+    for row in observations:
+        policy = row.get("policy")
+        severity = row.get("severity")
+        if isinstance(policy, str) and policy:
+            policies.setdefault(policy, []).append(row)
+        if isinstance(severity, str) and severity:
+            severities[severity] = severities.get(severity, 0) + 1
+    return {"aggregate": aggregate, "policy": {key: guardrail_effectiveness(rows) for key, rows in policies.items()},
+            "severity_counts": severities}
+
+
 def _percent(numerator, denominator):
     return round(100 * numerator / denominator, 6) if denominator else None
 

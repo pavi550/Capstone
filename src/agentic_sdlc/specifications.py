@@ -56,10 +56,71 @@ class SpecificationStore:
                     record TEXT NOT NULL,
                     PRIMARY KEY (run_id, kind)
                 );
+                CREATE TABLE IF NOT EXISTS provider_requests (
+                    request_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL REFERENCES specifications(run_id),
+                    stage TEXT NOT NULL, attempt INTEGER NOT NULL, agent TEXT NOT NULL,
+                    provider TEXT NOT NULL, model TEXT NOT NULL,
+                    charged_input INTEGER NOT NULL, charged_output INTEGER NOT NULL, charged_cost INTEGER,
+                    actual_input INTEGER, actual_output INTEGER, state TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS experiment_runs (
+                    experiment_id TEXT NOT NULL, trial_id TEXT NOT NULL,
+                    run_id TEXT NOT NULL UNIQUE REFERENCES specifications(run_id),
+                    PRIMARY KEY (experiment_id, trial_id)
+                );
+                CREATE TABLE IF NOT EXISTS provider_usage (
+                    request_id TEXT PRIMARY KEY REFERENCES provider_requests(request_id),
+                    record TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS lifecycle_stages (
+                    run_id TEXT NOT NULL REFERENCES specifications(run_id),
+                    stage TEXT NOT NULL,
+                    attempt INTEGER NOT NULL,
+                    started_at TEXT NOT NULL,
+                    finished_at TEXT,
+                    state TEXT NOT NULL,
+                    failure TEXT,
+                    refs TEXT,
+                    PRIMARY KEY (run_id, stage, attempt)
+                );
+                CREATE TABLE IF NOT EXISTS intake_failures (
+                    delivery_id TEXT PRIMARY KEY,
+                    attempts INTEGER NOT NULL,
+                    last_error TEXT NOT NULL,
+                    failed_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS intake_events (
+                    delivery_id TEXT PRIMARY KEY,
+                    digest TEXT NOT NULL,
+                    issue TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    received_at TEXT NOT NULL,
+                    run_id TEXT REFERENCES specifications(run_id)
+                );
+                CREATE TABLE IF NOT EXISTS receipt_history (
+                    run_id TEXT NOT NULL REFERENCES specifications(run_id),
+                    attempt INTEGER NOT NULL,
+                    kind TEXT NOT NULL,
+                    record TEXT NOT NULL,
+                    PRIMARY KEY (run_id, attempt, kind)
+                );
                 CREATE TABLE IF NOT EXISTS development_cancellations (
                     run_id TEXT PRIMARY KEY REFERENCES specifications(run_id),
                     cancelled_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS human_activities (
+                    activity_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL REFERENCES specifications(run_id),
+                    actor TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    ended_at TEXT,
+                    state TEXT NOT NULL,
+                    note TEXT
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS one_open_human_activity
+                    ON human_activities(actor) WHERE state = 'ACTIVE';
                 CREATE TABLE IF NOT EXISTS development_attempts (
                     run_id TEXT NOT NULL REFERENCES specifications(run_id),
                     attempt INTEGER NOT NULL,
@@ -75,7 +136,34 @@ class SpecificationStore:
         connection.execute("PRAGMA foreign_keys = ON")
         return connection
 
-    def create(self, draft: dict) -> str:
+    def begin_intake(self, issue, *, delivery_id=None):
+        draft = {"issue": issue, "status": "BLOCKED", "intake_pending": True,
+                 "acceptance_criteria": []}
+        draft["spec_sha256"] = specification_digest(draft)
+        return self.create(draft, delivery_id=delivery_id)
+
+    def finish_intake(self, run_id, draft):
+        digest = specification_digest(draft)
+        if draft.get("spec_sha256") != digest or draft.get("status") not in {"BLOCKED", "AWAITING_APPROVAL"}:
+            raise ValueError("Invalid completed intake draft")
+        with closing(self._connect()) as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = self._get(connection, run_id)
+            if self._cancelled(connection, run_id):
+                raise ValueError("Intake was cancelled")
+            if not existing["draft"].get("intake_pending") or existing["actor"]:
+                raise ValueError("Intake cannot replace an existing specification")
+            if existing["draft"]["issue"] != draft["issue"]:
+                raise ValueError("Intake issue identity changed")
+            connection.execute("UPDATE specifications SET draft=?, digest=?, status=? WHERE run_id=?",
+                               (json.dumps(draft), digest, draft["status"], run_id))
+            connection.execute("UPDATE intake_events SET status='DRAFTED' WHERE run_id=?", (run_id,))
+            if draft["status"] == "AWAITING_APPROVAL":
+                connection.execute("INSERT INTO approval_requests VALUES (?, ?)",
+                                   (run_id, datetime.now(UTC).isoformat()))
+        return run_id
+
+    def create(self, draft: dict, *, delivery_id=None) -> str:
         digest = specification_digest(draft)
         if digest != draft.get("spec_sha256"):
             raise ValueError("Specification digest mismatch")
@@ -84,6 +172,15 @@ class SpecificationStore:
             raise ValueError("Only an undecided specification draft can be stored")
         run_id = uuid4().hex
         with closing(self._connect()) as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if delivery_id is not None:
+                event = connection.execute(
+                    "SELECT issue, run_id FROM intake_events WHERE delivery_id = ?", (delivery_id,),
+                ).fetchone()
+                if not event or event["issue"] != draft["issue"]:
+                    raise ValueError("Intake delivery does not identify this Jira issue")
+                if event["run_id"]:
+                    return event["run_id"]
             connection.execute(
                 "INSERT INTO specifications (run_id, draft, digest, status) VALUES (?, ?, ?, ?)",
                 (run_id, json.dumps(draft), digest, status),
@@ -92,6 +189,11 @@ class SpecificationStore:
                 connection.execute(
                     "INSERT INTO approval_requests VALUES (?, ?)",
                     (run_id, datetime.now(UTC).isoformat()),
+                )
+            if delivery_id is not None:
+                connection.execute(
+                    "UPDATE intake_events SET run_id = ?, status = ? WHERE delivery_id = ?",
+                    (run_id, "QUEUED" if draft.get("intake_pending") else "DRAFTED", delivery_id),
                 )
         return run_id
 
@@ -135,6 +237,110 @@ class SpecificationStore:
                 )
                 result["approval_wait_seconds"] = max(0, elapsed.total_seconds())
             return result
+
+    def enqueue_issue(self, delivery_id, digest, issue):
+        with closing(self._connect()) as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "INSERT OR IGNORE INTO intake_events VALUES (?, ?, ?, 'QUEUED', ?, NULL)",
+                (delivery_id, digest, issue, datetime.now(UTC).isoformat()),
+            )
+            event = connection.execute("SELECT * FROM intake_events WHERE delivery_id = ?", (delivery_id,)).fetchone()
+            if event["digest"] != digest or event["issue"] != issue:
+                raise ValueError("Delivery ID was reused with different intake data")
+            return dict(event)
+
+    def fail_intake(self, delivery_id, failure, limit):
+        with closing(self._connect()) as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT status FROM intake_events WHERE delivery_id=?", (delivery_id,)).fetchone()
+            if not row or row["status"] != "QUEUED":
+                return
+            connection.execute(
+                "INSERT INTO intake_failures VALUES (?,1,?,?) ON CONFLICT(delivery_id) DO UPDATE SET "
+                "attempts=attempts+1,last_error=excluded.last_error,failed_at=excluded.failed_at",
+                (delivery_id, failure, datetime.now(UTC).isoformat()),
+            )
+            connection.execute(
+                "UPDATE intake_events SET status='DEAD_LETTER' WHERE delivery_id=? AND "
+                "(SELECT attempts FROM intake_failures WHERE delivery_id=?)>=?", (delivery_id, delivery_id, limit),
+            )
+
+    def dead_letters(self):
+        with closing(self._connect()) as connection:
+            return [dict(row) for row in connection.execute(
+                "SELECT intake_events.delivery_id,issue,attempts,last_error,failed_at FROM intake_events "
+                "JOIN intake_failures USING(delivery_id) WHERE status='DEAD_LETTER' ORDER BY failed_at",
+            )]
+
+    def intake_queue(self):
+        with closing(self._connect()) as connection:
+            return [dict(row) for row in connection.execute(
+                "SELECT * FROM intake_events WHERE status = 'QUEUED' ORDER BY received_at, delivery_id",
+            )]
+
+    def resolve_issue(self, issue: str) -> str:
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                "SELECT run_id FROM specifications WHERE json_extract(draft, '$.issue') = ? LIMIT 2",
+                (issue,),
+            ).fetchall()
+        if len(rows) != 1:
+            raise ValueError("Issue must identify exactly one stored run; use --run-id for multiple drafts")
+        return rows[0]["run_id"]
+
+    def human_activity(self, run_id, actor, kind, *, end=False, interrupt=False, note=None):
+        kinds = {"requirements", "review", "re-review", "manual-code", "manual-test", "rework", "validation"}
+        if not actor.strip() or len(actor) > 128 or kind not in kinds or (note and len(note) > 2000):
+            raise ValueError("Supply an actor, a supported human activity and a bounded note")
+        stamp = datetime.now(UTC).isoformat()
+        with closing(self._connect()) as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._get(connection, run_id)
+            row = connection.execute(
+                "SELECT * FROM human_activities WHERE actor = ? AND state = 'ACTIVE'", (actor,),
+            ).fetchone()
+            if end:
+                if not row or (row["run_id"], row["kind"]) != (run_id, kind):
+                    raise ValueError("No matching active human activity")
+                identity = row["activity_id"]
+                connection.execute(
+                    "UPDATE human_activities SET ended_at = ?, state = ?, note = ? WHERE activity_id = ?",
+                    (stamp, "INTERRUPTED" if interrupt else "COMPLETE", note, identity),
+                )
+            elif row:
+                if (row["run_id"], row["kind"]) != (run_id, kind):
+                    raise ValueError("Finish or interrupt the actor's existing activity first")
+                identity = row["activity_id"]
+            else:
+                identity = uuid4().hex
+                connection.execute(
+                    "INSERT INTO human_activities VALUES (?, ?, ?, ?, ?, NULL, 'ACTIVE', NULL)",
+                    (identity, run_id, actor, kind, stamp),
+                )
+            return dict(connection.execute(
+                "SELECT * FROM human_activities WHERE activity_id = ?", (identity,),
+            ).fetchone())
+
+    def human_effort(self, run_id):
+        with closing(self._connect()) as connection:
+            self._get(connection, run_id)
+            rows = connection.execute(
+                "SELECT * FROM human_activities WHERE run_id = ? ORDER BY started_at", (run_id,),
+            ).fetchall()
+        sessions, totals = [], {}
+        for row in rows:
+            session = dict(row)
+            duration = None
+            if row["state"] == "COMPLETE":
+                elapsed = datetime.fromisoformat(row["ended_at"]) - datetime.fromisoformat(row["started_at"])
+                if elapsed.total_seconds() >= 0:
+                    duration = elapsed.total_seconds()
+                    totals[row["kind"]] = totals.get(row["kind"], 0) + duration
+            sessions.append({**session, "active_seconds": duration})
+        return {"sessions": sessions, "measured_seconds_by_kind": totals,
+                "measured_human_seconds": sum(totals.values()) if totals else None,
+                "incomplete_sessions": sum(session["active_seconds"] is None for session in sessions)}
 
     def decide(
         self, run_id: str, digest: str, status: str, actor: str, reason: str | None,
@@ -182,21 +388,20 @@ class SpecificationStore:
         with closing(self._connect()) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
             self._get(connection, run_id)
-            last = connection.execute(
-                """
-                SELECT status FROM development_attempts
-                WHERE run_id = ? ORDER BY attempt DESC LIMIT 1
-                """, (run_id,),
+            if connection.execute(
+                "SELECT 1 FROM receipts WHERE run_id=? AND kind IN ('validation', 'validation_v2')", (run_id,),
+            ).fetchone():
+                raise ValueError("A finalized run cannot be cancelled")
+            active = connection.execute(
+                "SELECT 1 FROM lifecycle_stages WHERE run_id=? AND state='RUNNING'", (run_id,),
             ).fetchone()
-            if last and last["status"] == "READY_FOR_VERIFICATION":
-                raise ValueError("Development is complete; there is no pending attempt to cancel")
             connection.execute(
                 "INSERT OR IGNORE INTO development_cancellations VALUES (?, ?)",
                 (run_id, datetime.now(UTC).isoformat()),
             )
-        return {"run_id": run_id, "status": "CANCELLED"}
+        return {"run_id": run_id, "status": "CANCELLING" if active else "CANCELLED"}
 
-    def _claim_development(self, run_id, authority, max_attempts, inputs):
+    def _claim_development(self, run_id, authority, max_attempts, inputs, correction, correction_limit):
         with closing(self._connect()) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
             decision = self._get(connection, run_id)
@@ -216,26 +421,48 @@ class SpecificationStore:
                 """,
                 (run_id,),
             ).fetchone()
+            remediation = None
+            if correction and (not last or last["status"] != "READY_FOR_VERIFICATION"):
+                raise ValueError("Resume the current attempt before requesting another correction")
             if last:
                 previous = json.loads(last["evidence"])
+                remediation = previous.get("remediation")
                 if previous["inputs"] != inputs:
                     raise ValueError("Resume requires the original source and output directories")
                 if last["status"] == "READY_FOR_VERIFICATION":
-                    return None, previous
+                    if correction is None:
+                        return None, previous
+                    if previous.get("manifest_sha256") != correction["manifest_sha256"]:
+                        raise ValueError("Correction refers to stale development evidence")
+                    if connection.execute(
+                        "SELECT 1 FROM receipts WHERE run_id = ? AND kind IN ('review_approval', 'validation')",
+                        (run_id,),
+                    ).fetchone():
+                        raise ValueError("A run with final review approval cannot be corrected in place")
+                    cycle = (remediation or {}).get("cycle", 0) + 1
+                    if cycle > correction_limit:
+                        return None, {"run_id": run_id, "status": "FAILED", "reason": "Correction limit reached"}
+                    remediation = {**correction, "cycle": cycle}
+                    connection.execute(
+                        "INSERT INTO receipt_history SELECT run_id, ?, kind, record FROM receipts WHERE run_id = ?",
+                        (last["attempt"], run_id),
+                    )
+                    connection.execute("DELETE FROM receipts WHERE run_id = ?", (run_id,))
                 if last["status"] == "RUNNING":
                     connection.execute(
                         "UPDATE development_attempts SET status = 'INTERRUPTED' WHERE run_id = ? AND attempt = ?",
                         (run_id, last["attempt"]),
                     )
             attempt = last["attempt"] + 1 if last else 1
-            if attempt > max_attempts:
+            retry_start = remediation["source_attempt"] + 1 if remediation else 1
+            if attempt - retry_start >= max_attempts:
                 # Preserve an interrupted attempt even when there is no retry budget left.
                 return None, {"run_id": run_id, "status": "FAILED", "reason": "Development retry limit reached"}
             connection.execute(
                 "INSERT INTO development_attempts VALUES (?, ?, 'RUNNING', ?)",
-                (run_id, attempt, json.dumps({"inputs": inputs, "started_at": datetime.now(UTC).isoformat()})),
+                (run_id, attempt, json.dumps({"inputs": inputs, "started_at": datetime.now(UTC).isoformat(), "remediation": remediation})),
             )
-            return attempt, decision["draft"]
+            return attempt, (decision["draft"], remediation)
 
     @staticmethod
     def _cancelled(connection, run_id):
@@ -245,28 +472,36 @@ class SpecificationStore:
 
     def develop(
         self, run_id: str, authority: ApprovalAuthority, generate, max_attempts: int, *, inputs: dict,
+        correction=None, correction_limit=0, remediation_generate=None,
     ) -> dict:
         """Hold a per-run OS-backed database lock while persisting attempts in the main store."""
         if not re.fullmatch(r"[a-f0-9]{32}", run_id):
             raise ValueError("Invalid specification run ID")
         if type(max_attempts) is not int or not 1 <= max_attempts <= 5:
             raise ValueError("enterprise.development_attempts must be between 1 and 5")
+        if type(correction_limit) is not int or not 0 <= correction_limit <= 5:
+            raise ValueError("enterprise.correction_cycles must be between 0 and 5")
         lock_path = self.path.with_name(f".{self.path.name}.{run_id}.lock")
         with closing(sqlite3.connect(lock_path, timeout=0)) as lock:
             try:
                 lock.execute("BEGIN EXCLUSIVE")
             except sqlite3.OperationalError:
                 raise ValueError("Development run is locked or the lock database is unavailable") from None
-            attempt, data = self._claim_development(run_id, authority, max_attempts, inputs)
+            attempt, data = self._claim_development(run_id, authority, max_attempts, inputs, correction, correction_limit)
             if attempt is None:
                 return data
+            draft, remediation = data
             started = perf_counter()
             try:
-                evidence = generate(data, attempt)
-            except (OSError, RuntimeError, ValueError) as exc:
+                if remediation and remediation_generate is None:
+                    raise ValueError("Correction requires the configured remediation generator")
+                evidence = remediation_generate(draft, attempt, remediation) if remediation else generate(draft, attempt)
+            except (KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
                 evidence = {"run_id": run_id, "attempt": attempt, "status": "FAILED",
                             "failure_type": type(exc).__name__}
             evidence["inputs"] = inputs
+            if remediation:
+                evidence["remediation"] = remediation
             evidence["duration_ms"] = round((perf_counter() - started) * 1000, 3)
             evidence["finished_at"] = datetime.now(UTC).isoformat()
             with closing(self._connect()) as connection, connection:
@@ -285,6 +520,21 @@ class SpecificationStore:
             return evidence
 
 
+    def approved_specification(self, run_id, authority):
+        with closing(self._connect()) as connection, connection:
+            connection.execute("BEGIN")
+            decision = self._get(connection, run_id)
+            if self._cancelled(connection, run_id):
+                raise ValueError("Development was cancelled")
+            signed = connection.execute(
+                "SELECT signature FROM decision_signatures WHERE run_id = ?", (run_id,),
+            ).fetchone()
+            if decision["status"] != "APPROVED" or not authority.verify(
+                run_id, decision, signed["signature"] if signed else None,
+            ):
+                raise ValueError("A verified requirement approval is required")
+            return decision["draft"]
+
     def verified_development(self, run_id: str, authority: ApprovalAuthority) -> tuple[dict, dict]:
         with closing(self._connect()) as connection, connection:
             connection.execute("BEGIN")
@@ -298,12 +548,12 @@ class SpecificationStore:
                 raise ValueError("A verified requirement approval is required")
             attempt = connection.execute(
                 """
-                SELECT evidence FROM development_attempts
-                WHERE run_id = ? AND status = 'READY_FOR_VERIFICATION'
+                SELECT evidence, status FROM development_attempts
+                WHERE run_id = ?
                 ORDER BY attempt DESC LIMIT 1
                 """, (run_id,),
             ).fetchone()
-            if attempt is None:
+            if attempt is None or attempt["status"] != "READY_FOR_VERIFICATION":
                 raise ValueError("No integrated development artifacts are ready")
             evidence = json.loads(attempt["evidence"])
             if evidence["spec_sha256"] != decision["digest"]:
@@ -321,9 +571,49 @@ class SpecificationStore:
                 raise ValueError(f"Missing {kind} receipt")
             return json.loads(row["record"])
 
-    def record_receipt(self, run_id: str, kind: str, record: dict) -> dict:
+    def provider_requests(self, run_id):
+        with closing(self._connect()) as connection:
+            return [{**dict(row), "normalized_usage": json.loads(row["normalized_usage"] or "null")}
+                    for row in connection.execute(
+                        "SELECT requests.*, usage.record AS normalized_usage FROM provider_requests requests "
+                        "LEFT JOIN provider_usage usage USING(request_id) WHERE requests.run_id=? ORDER BY requests.rowid",
+                        (run_id,),
+                    )]
+
+    def lifecycle_stages(self, run_id):
+        with closing(self._connect()) as connection:
+            return [{**dict(row), "refs": json.loads(row["refs"] or "null")} for row in connection.execute(
+                "SELECT * FROM lifecycle_stages WHERE run_id=? ORDER BY started_at", (run_id,),
+            )]
+
+    def historical_receipts(self, run_id):
+        with closing(self._connect()) as connection:
+            return [{**dict(row), "record": json.loads(row["record"])} for row in connection.execute(
+                "SELECT attempt, kind, record FROM receipt_history WHERE run_id = ? ORDER BY attempt, kind", (run_id,),
+            )]
+
+    def record_receipt(self, run_id: str, kind: str, record: dict, *, manifest=None) -> dict:
         with closing(self._connect()) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
+            if self._cancelled(connection, run_id):
+                from .lifecycle import StageCancelled
+
+                raise StageCancelled("Cancelled runs cannot publish new receipts")
+            manifest = manifest or record.get("payload", record).get("manifest_sha256")
+            if manifest:
+                active = connection.execute(
+                    "SELECT status, evidence FROM development_attempts WHERE run_id = ? ORDER BY attempt DESC LIMIT 1",
+                    (run_id,),
+                ).fetchone()
+                if (not active or active["status"] != "READY_FOR_VERIFICATION"
+                        or json.loads(active["evidence"]).get("manifest_sha256") != manifest):
+                    raise ValueError("Receipt refers to an obsolete development attempt")
+            if kind in {"review_approval", "review_rejection"}:
+                opposite = "review_rejection" if kind == "review_approval" else "review_approval"
+                if connection.execute(
+                    "SELECT 1 FROM receipts WHERE run_id = ? AND kind = ?", (run_id, opposite),
+                ).fetchone():
+                    raise ValueError("An incompatible final review decision is already recorded")
             previous = connection.execute(
                 "SELECT record FROM receipts WHERE run_id = ? AND kind = ?", (run_id, kind),
             ).fetchone()

@@ -123,11 +123,17 @@ def test_actual_receipt_gates_and_bound_review(tmp_path, policy, mocked_docker, 
         return exit_code, {"sha256": "a" * 64, "bytes": 1}, {"sha256": "b" * 64, "bytes": 0}
 
     monkeypatch.setattr(container_verifier, "_capture", capture)
-    outcome = verification.execute_verification(store, run_id, authority, "verifier", policy, acceptance)
-    assert outcome["environment"] == "LOCAL_ACTUAL"
-    assert all(check["exit_code"] == exit_code for check in outcome["checks"])
     config = tmp_path / "policy.yaml"
     config.write_text(yaml.safe_dump(policy.data), encoding="utf-8")
+    common = ["--store", str(store.path), "--run-id", run_id, "--config", str(config)]
+    assert main(["dev", "testing", *common, "--actor", "verifier", "--acceptance-dir", str(acceptance)]) == (
+        2 if exit_code else 0
+    )
+    outcome = json.loads(capsys.readouterr().out)
+    assert outcome["environment"] == "LOCAL_ACTUAL"
+    assert all(check["exit_code"] == exit_code for check in outcome["checks"])
+    first_pass = store.receipt(run_id, "first_pass_score")
+    assert first_pass["delivery_eligibility"] == ("BLOCKED" if exit_code else "PENDING")
     assert main(["dev", "score", "--store", str(store.path), "--run-id", run_id,
                  "--config", str(config), "--report-dir", str(tmp_path / "report")]) == 0
     score = json.loads(capsys.readouterr().out)
@@ -140,7 +146,10 @@ def test_actual_receipt_gates_and_bound_review(tmp_path, policy, mocked_docker, 
         return
     reviewed = verification.review(store, run_id, authority, policy)
     verification.approve_review(store, run_id, authority, "reviewer", reviewed["review_sha256"])
-    assert verification.validate(store, run_id, authority)["status"] == "LOCAL_DEV_VALIDATED"
+    assert main(["dev", "validate", *common]) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "LOCAL_DEV_VALIDATED"
+    assert store.receipt(run_id, "final_score")["status"] == "PROVISIONAL"
+    assert store.receipt(run_id, "first_pass_score") == first_pass
     manifest = os.path.join(evidence["artifact_dir"], "integrated", evidence["code_files"][0])
     with open(manifest, "a", encoding="utf-8") as stream:
         stream.write("# modified")

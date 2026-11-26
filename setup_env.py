@@ -329,6 +329,8 @@ def configure():
     services = service_options[service]
     for name in services:
         values.update(service_settings(name))
+    if "jira" in services and not settings(ENV_PATH, environ={}).get("JIRA_JQL"):
+        values["JIRA_JQL"] = 'project = "CP" AND status = "To Do"'
     if not values:
         return
     with step("saving .env", "Check that the repository root and .env are writable."):

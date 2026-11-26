@@ -59,6 +59,7 @@ def test_dotenv_precedence_and_absolute_location(tmp_path, monkeypatch):
     repo.mkdir()
     env_file = repo / ".env"
     env_file.write_text('LLM_MODEL="developer model"\nGOOGLE_API_KEY=file-key\n', encoding="utf-8")
+    monkeypatch.delenv("CAPSTONE_ENV_FILE")
     monkeypatch.setattr(config, "ENV_FILE", env_file)
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("LLM_MODEL", raising=False)
@@ -336,7 +337,8 @@ def test_mcp_stdio_tool_registrations(service, values, expected):
         process = StdioServerParameters(
             command=sys.executable,
             args=[str(config.ENV_FILE.parent / "mcp" / f"{service}_mcp_server.py")],
-            env={**values, "PYTHONPATH": os.environ.get("PYTHONPATH", "")},
+            env={**values, "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
+                 "CAPSTONE_ENV_FILE": os.environ["CAPSTONE_ENV_FILE"]},
         )
         async with (
             stdio_client(process) as (reader, writer),

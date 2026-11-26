@@ -1,0 +1,95 @@
+name: Protected enterprise evaluator
+on:
+  workflow_call:
+    inputs:
+      bundle:
+        required: true
+        type: string
+      manifest_sha256:
+        required: true
+        type: string
+      spec_sha256:
+        required: true
+        type: string
+permissions:
+  contents: read
+env:
+  CAPSTONE_ENV_FILE: /dev/null
+  CI_REPOSITORY: ${{ github.repository }}
+  CI_COMMIT: ${{ github.sha }}
+  CI_WORKFLOW: ${{ vars.CAPSTONE_CALLER_WORKFLOW }}
+  CI_EVALUATOR_REVISION: ${{ vars.CAPSTONE_EVALUATOR_REVISION }}
+  CI_MANIFEST_SHA256: ${{ inputs.manifest_sha256 }}
+  CI_SPEC_SHA256: ${{ inputs.spec_sha256 }}
+jobs:
+  independent-evaluation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.CAPSTONE_EVALUATOR_REPOSITORY }}
+          ref: ${{ vars.CAPSTONE_EVALUATOR_REVISION }}
+          path: evaluator
+          persist-credentials: false
+      - name: Require immutable evaluator revision
+        working-directory: evaluator
+        run: |
+          test "$(git rev-parse HEAD)" = "$CI_EVALUATOR_REVISION"
+          test ${#CI_EVALUATOR_REVISION} -eq 40
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: target
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install ./evaluator
+      - name: Build trusted verifier
+        run: docker build -t capstone-verifier evaluator/examples/enterprise/verifier-image
+      - name: Bind verifier image to trusted policy
+        env:
+          POLICY: ${{ vars.CAPSTONE_EVALUATOR_POLICY }}
+        run: |
+          python -c 'import os,pathlib,subprocess,yaml; root=pathlib.Path("evaluator").resolve(); p=(root/os.environ["POLICY"]).resolve(); assert p.is_relative_to(root); cfg=yaml.safe_load(p.read_text()); cfg["enterprise"]["container"]["image"]=subprocess.check_output(["docker","image","inspect","capstone-verifier","--format","{{.Id}}"],text=True).strip(); pathlib.Path("policy.yaml").write_text(yaml.safe_dump(cfg))'
+      - name: Evaluate isolated target
+        env:
+          BUNDLE: ${{ inputs.bundle }}
+          ACCEPTANCE: ${{ vars.CAPSTONE_ACCEPTANCE_DIRECTORY }}
+        run: |
+          python -c 'import os,pathlib; root=pathlib.Path("target").resolve(); assert (root/os.environ["BUNDLE"]).resolve().is_relative_to(root); root=pathlib.Path("evaluator").resolve(); assert (root/os.environ["ACCEPTANCE"]).resolve().is_relative_to(root)'
+          python -m agentic_sdlc.delivery_evidence evaluate --config policy.yaml --bundle "target/$BUNDLE" --acceptance "evaluator/$ACCEPTANCE" --output raw-evidence.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: evaluator-raw-${{ github.run_attempt }}
+          path: raw-evidence.json
+          if-no-files-found: error
+  independent-attestation:
+    needs: independent-evaluation
+    runs-on: ubuntu-latest
+    environment: capstone-trusted-evaluator
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.CAPSTONE_EVALUATOR_REPOSITORY }}
+          ref: ${{ vars.CAPSTONE_EVALUATOR_REVISION }}
+          persist-credentials: false
+      - run: test "$(git rev-parse HEAD)" = "$CI_EVALUATOR_REVISION"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install .
+      - uses: actions/download-artifact@v4
+        with:
+          name: evaluator-raw-${{ github.run_attempt }}
+      - name: Attest without target checkout or execution
+        env:
+          CI_SIGNING_KEY: ${{ secrets.CAPSTONE_CI_EVALUATOR_KEY }}
+        run: python -m agentic_sdlc.delivery_evidence sign --input raw-evidence.json --output attestation.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: evaluator-attestation-${{ github.run_attempt }}
+          path: |
+            attestation.json
+            raw-evidence.json
+          if-no-files-found: error

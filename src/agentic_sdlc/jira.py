@@ -45,6 +45,17 @@ def adf_text(node: dict) -> str:
     return separator.join(children)
 
 
+def _description_links(value):
+    if isinstance(value, str):
+        return re.findall(r'https://[^\s<>"\)]+', value)
+    if isinstance(value, dict):
+        links = [value[key] for key in ("href", "url") if isinstance(value.get(key), str)]
+        return links + [link for child in value.values() for link in _description_links(child)]
+    if isinstance(value, list):
+        return [link for item in value for link in _description_links(item)]
+    return []
+
+
 def issue_to_requirement(issue: dict[str, Any]) -> Requirement:
     fields = issue.get("fields", {})
     description = fields.get("description") or ""
@@ -107,6 +118,9 @@ class JiraClient:
         raise RuntimeError("Jira search exceeded its pagination limit")
 
     def get_requirement(self, issue_key: str) -> Requirement:
+        return issue_to_requirement(self.get_issue(issue_key))
+
+    def get_issue(self, issue_key: str) -> dict:
         if not re.fullmatch(r"[A-Z][A-Z0-9_]*-[1-9][0-9]*", issue_key):
             raise ValueError("Use a Jira issue key, e.g. CP-101")
         version = 3 if self.cfg.get("jira.search_path", "").startswith("/rest/api/3/") else 2
@@ -115,7 +129,18 @@ class JiraClient:
         )
         if data.get("key") != issue_key:
             raise RuntimeError("Jira returned a different issue key")
-        return issue_to_requirement(data)
+        return data
+
+    def documentation_links(self, issue: dict) -> list[str]:
+        key = issue["key"]
+        if not re.fullmatch(r"[A-Z][A-Z0-9_]*-[1-9][0-9]*", key):
+            raise ValueError("Invalid Jira issue key")
+        remote = self._search_page(f"{self.base}/rest/api/3/issue/{key}/remotelink")
+        if not isinstance(remote, list):
+            raise TypeError("Jira returned an invalid remote links response")
+        urls = _description_links(issue.get("fields", {}).get("description"))
+        urls.extend(row.get("object", {}).get("url") for row in remote)
+        return list(dict.fromkeys(url for url in urls if isinstance(url, str)))
 
     def _search_page(self, url):
         for attempt in range(3):
@@ -125,6 +150,23 @@ class JiraClient:
                 if exc.status not in {429, 502, 503, 504} or attempt == 2:
                     raise RuntimeError(f"Jira search failed (HTTP {exc.status})") from None
             sleep(0.25 * 2 ** attempt)
+
+    def transition(self, issue_key: str, stage: str) -> dict:
+        if not self.cfg.get("enterprise.jira_write.enabled", False):
+            raise ValueError("Jira transitions are disabled by policy")
+        if (not re.fullmatch(r"[A-Z][A-Z0-9_]*-[1-9][0-9]*", issue_key)
+                or issue_key.rsplit("-", 1)[0] not in self.cfg.get("enterprise.jira_write.projects", [])):
+            raise ValueError("Jira write target is outside the authorized project scope")
+        mappings = self.cfg.get("enterprise.jira_write.transitions", {})
+        transition = mappings.get(stage) if isinstance(mappings, dict) else None
+        if not isinstance(transition, str) or not re.fullmatch(r"[0-9]+", transition):
+            raise ValueError("Jira stage has no authorized transition mapping")
+        try:
+            request_json("POST", f"{self.base}/rest/api/3/issue/{issue_key}/transitions", headers=self.headers,
+                         body={"transition": {"id": transition}})
+        except HttpError as exc:
+            raise RuntimeError(f"Jira transition failed (HTTP {exc.status})") from None
+        return {"issue": issue_key, "stage": stage, "status": "TRANSITION_REQUESTED"}
 
     def create_issue(self, project: str, summary: str, description: str, issuetype: str) -> str:
         body = {"fields": {

@@ -16,6 +16,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from .development import _manifest, _snapshot
+from .lifecycle import StageCancelled, checkpoint
 
 CHECK_IDS = {"acceptance", "generated", "regression", "quality", "security", "definition_of_done", "dev"}
 
@@ -50,8 +51,18 @@ def _capture(command, *, env, timeout, cleanup):
         stdout = pool.submit(_digest_stream, process.stdout)
         stderr = pool.submit(_digest_stream, process.stderr)
         try:
-            exit_code = process.wait(timeout)
-        except subprocess.TimeoutExpired:
+            deadline = time.monotonic() + timeout
+            while process.poll() is None:
+                checkpoint()
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(command, timeout)
+                try:
+                    process.wait(min(remaining, 0.25))
+                except subprocess.TimeoutExpired:
+                    continue
+            exit_code = process.returncode
+        except (subprocess.TimeoutExpired, StageCancelled, KeyboardInterrupt) as exc:
             process.kill()
             process.wait()
             # Remove only the uniquely named container created for this check.
@@ -59,6 +70,8 @@ def _capture(command, *, env, timeout, cleanup):
                 subprocess.run(cleanup, env=env, capture_output=True, timeout=15, check=False)  # nosec B603
             except (OSError, subprocess.TimeoutExpired):
                 pass
+            if not isinstance(exc, subprocess.TimeoutExpired):
+                raise
             exit_code = None
     return exit_code, stdout.result(), stderr.result()
 
@@ -93,6 +106,12 @@ class DockerVerifier:
         if (acceptance.is_relative_to(integrated) or integrated.is_relative_to(acceptance)
                 or not acceptance.is_dir()):
             raise ValueError("Provide an independent acceptance directory outside the generated workspace")
+        return self._run(integrated, acceptance, identity, expected, sorted(CHECK_IDS))
+
+    def run_dev(self, integrated: Path, identity: dict, expected: dict) -> dict:
+        return self._run(integrated, None, identity, expected, ("dev",))[0]
+
+    def _run(self, integrated, acceptance, identity, expected, checks):
         env = _environment()
         with tempfile.TemporaryDirectory(prefix="capstone-verifier-") as folder:
             private = Path(folder)
@@ -110,16 +129,16 @@ class DockerVerifier:
             _snapshot(integrated, workspace)
             if _manifest(workspace) != expected:
                 raise ValueError("The verifier snapshot differs from the approved artifact")
-            _snapshot(acceptance, trusted)
-            if not any(trusted.iterdir()):
-                raise ValueError("The trusted acceptance directory is empty")
-            acceptance_sha256 = hashlib.sha256(
-                repr(sorted(_manifest(trusted).items())).encode(),
-            ).hexdigest()
-            return [
-                self._check(docker, env, workspace, trusted, acceptance_sha256, identity, check)
-                for check in sorted(CHECK_IDS)
-            ]
+            acceptance_sha256 = None
+            if acceptance is not None:
+                _snapshot(acceptance, trusted)
+                if not any(trusted.iterdir()):
+                    raise ValueError("The trusted acceptance directory is empty")
+                acceptance_sha256 = hashlib.sha256(
+                    repr(sorted(_manifest(trusted).items())).encode(),
+                ).hexdigest()
+            return [self._check(docker, env, workspace, trusted, acceptance_sha256, identity, check)
+                    for check in checks]
 
     def _check(self, docker, env, workspace, trusted, acceptance_sha256, identity, check):
         name = f"capstone-verify-{uuid4().hex}"

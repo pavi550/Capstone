@@ -1,5 +1,7 @@
 import json
+import os
 import shutil
+import socket
 from pathlib import Path
 
 import pytest
@@ -10,6 +12,23 @@ from agentic_sdlc.orchestrator import Orchestrator
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = ROOT / "examples"
+
+
+@pytest.fixture(autouse=True)
+def isolate_integration_configuration(tmp_path, monkeypatch):
+    monkeypatch.setenv("CAPSTONE_ENV_FILE", str(tmp_path / "integration.env"))
+    for name in os.environ.copy():
+        if name.startswith(("JIRA_", "CONFLUENCE_", "GITHUB_", "LLM_", "OPENAI_", "ANTHROPIC_",
+                            "GOOGLE_", "GROQ_", "OPENROUTER_", "GERRIT_", "LANGCHAIN_", "LANGSMITH_")):
+            monkeypatch.delenv(name)
+    connect = socket.socket.connect
+
+    def loopback_only(sock, address):
+        if isinstance(address, tuple) and address[0] not in {"127.0.0.1", "::1", "localhost"}:
+            raise AssertionError("Regression tests cannot connect to a live external service")
+        return connect(sock, address)
+
+    monkeypatch.setattr(socket.socket, "connect", loopback_only)
 
 
 @pytest.fixture
