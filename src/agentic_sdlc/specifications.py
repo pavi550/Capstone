@@ -673,12 +673,20 @@ class SpecificationStore:
                 if (not active or active["status"] != "READY_FOR_VERIFICATION"
                         or json.loads(active["evidence"]).get("manifest_sha256") != manifest):
                     raise ValueError("Receipt refers to an obsolete development attempt")
-            if kind in {"review_approval", "review_rejection"}:
-                opposite = "review_rejection" if kind == "review_approval" else "review_approval"
+            opposite_decisions = {
+                "development_approval": "development_rejection",
+                "development_rejection": "development_approval",
+                "quality_approval": "quality_rejection",
+                "quality_rejection": "quality_approval",
+                "review_approval": "review_rejection",
+                "review_rejection": "review_approval",
+            }
+            if kind in opposite_decisions:
+                opposite = opposite_decisions[kind]
                 if connection.execute(
                     "SELECT 1 FROM receipts WHERE run_id = ? AND kind = ?", (run_id, opposite),
                 ).fetchone():
-                    raise ValueError("An incompatible final review decision is already recorded")
+                    raise ValueError("An incompatible human decision is already recorded")
             previous = connection.execute(
                 "SELECT record FROM receipts WHERE run_id = ? AND kind = ?", (run_id, kind),
             ).fetchone()

@@ -863,6 +863,11 @@ Use `dev backlog`, `dev spec`, `dev context`, `dev score`, and `dev compare`
 for the new read-only intake and independent evaluation commands. The
 [implementation checklist and offline reproduction guide](docs/enterprise-implementation.md)
 records current coverage, commands, and remaining work.
+See the [AI-SDLC Framework Guide](docs/AI-SDLC-Framework-Guide.md) for a
+human-friendly setup, workflow, artifact, metrics, and current-capability guide.
+Copilot slash-command skills are available under `.github/skills/`; they
+coordinate the existing CLI stages and pause for human decisions. Skill
+commands use lowercase hyphenated names (for example, `/dev-code`).
 The guide documents both the offline approval demo and the local Docker
 verification fixture. The setup wizard saves Jira and Confluence settings in
 the ignored `.env` file. From the repository root, run

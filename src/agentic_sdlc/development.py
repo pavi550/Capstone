@@ -356,12 +356,23 @@ def stage(orchestrator, draft, source: Path, output: Path, run_id: str, attempt:
                 return {**evidence, "status": "BLOCKED", "reason": "conflicting agent outputs"}
             planned[name.casefold()] = (name, workspace)
     differences = []
+    diff_metrics = {"code_lines_added": 0, "code_lines_removed": 0,
+                    "test_lines_added": 0, "test_lines_removed": 0}
     for name, workspace in planned.values():
         path = integrated / name
         replacement = workspace / name
         before = path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True) if path.exists() else []
         after = replacement.read_text(encoding="utf-8").splitlines(keepends=True)
-        differences.extend(unified_diff(before, after, fromfile=f"a/{name}", tofile=f"b/{name}"))
+        file_diff = list(unified_diff(before, after, fromfile=f"a/{name}", tofile=f"b/{name}"))
+        prefix = "test" if name in testing[0] else "code"
+        changed_lines = file_diff[2:]
+        diff_metrics[f"{prefix}_lines_added"] += sum(
+            line.startswith("+") for line in changed_lines
+        )
+        diff_metrics[f"{prefix}_lines_removed"] += sum(
+            line.startswith("-") for line in changed_lines
+        )
+        differences.extend(file_diff)
         path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(replacement, path)
     if remediation and not differences:
@@ -371,6 +382,7 @@ def stage(orchestrator, draft, source: Path, output: Path, run_id: str, attempt:
     evidence["diff_sha256"] = _digest(patch)
     evidence["code_files"] = sorted(coding[0])
     evidence["test_files"] = sorted(testing[0])
+    evidence["diff_metrics"] = diff_metrics
     evidence["timings_ms"]["integration"] = round((perf_counter() - start) * 1000, 3)
     manifest = root / "manifest.json"
     manifest.write_text(

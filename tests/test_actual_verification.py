@@ -21,9 +21,10 @@ from agentic_sdlc.specifications import SpecificationStore, specification_digest
 @pytest.fixture
 def policy(monkeypatch):
     monkeypatch.setenv("APPROVAL_FIXTURE", "reviewer-fixture-key-of-at-least-32-bytes")
+    monkeypatch.setenv("DEVELOPMENT_FIXTURE", "developer-fixture-key-of-at-least-32-bytes")
     monkeypatch.setenv("VERIFICATION_FIXTURE", "verifier-fixture-key-of-at-least-32-bytes")
     return Config.load(overrides={"enterprise": {
-        "approvers": {"reviewer": "APPROVAL_FIXTURE"},
+        "approvers": {"reviewer": "APPROVAL_FIXTURE", "developer": "DEVELOPMENT_FIXTURE"},
         "verifiers": {"verifier": "VERIFICATION_FIXTURE"},
         "container": {
             "image": "sha256:" + "a" * 64,
@@ -57,6 +58,9 @@ def _artifact(tmp_path, cfg, *, real_model=False):
         },
     )
     assert evidence["status"] == "READY_FOR_VERIFICATION"
+    verification.approve_development(
+        store, run_id, authority, "developer", evidence["manifest_sha256"],
+    )
     return store, authority, run_id, evidence
 
 
@@ -144,6 +148,10 @@ def test_actual_receipt_gates_and_bound_review(tmp_path, policy, mocked_docker, 
         with pytest.raises(ValueError, match="mandatory gate"):
             verification.review(store, run_id, authority, policy)
         return
+    verification.approve_quality(
+        store, run_id, authority, "reviewer",
+        verification._digest(store.receipt(run_id, "actual_verification")),
+    )
     reviewed = verification.review(store, run_id, authority, policy)
     verification.approve_review(store, run_id, authority, "reviewer", reviewed["review_sha256"])
     assert main(["dev", "validate", *common]) == 0
@@ -261,6 +269,29 @@ def test_disposable_unified_local_workflow_corrects_and_resumes(tmp_path, policy
     authority = LocalApprovalAuthority(cfg)
     store.decide(run_id, initial["specification_sha256"], "APPROVED", "reviewer", None, authority)
     resume = ["dev", "workflow-resume", "--store", str(db), "--run-id", run_id, "--allow-provider"]
+    assert main(resume) == 0
+    development = json.loads(capsys.readouterr().out)
+    assert (development["stage"], development["status"]) == ("development", "WAITING_FOR_APPROVAL")
+    verification.approve_development(
+        store, run_id, authority, "developer", development["manifest_sha256"],
+    )
+    assert main(resume) == 0
+    quality = json.loads(capsys.readouterr().out)
+    assert (quality["stage"], quality["status"]) == ("quality", "WAITING_FOR_APPROVAL")
+    verification.approve_quality(store, run_id, authority, "reviewer", quality["verification_sha256"])
+    assert main(resume) == 0
+    correction_pause = json.loads(capsys.readouterr().out)
+    assert (correction_pause["stage"], correction_pause["status"]) == ("correction", "PAUSED")
+    assert main([*resume, "--authorize-correction"]) == 0
+    correction = json.loads(capsys.readouterr().out)
+    assert (correction["stage"], correction["status"]) == ("development", "WAITING_FOR_APPROVAL")
+    verification.approve_development(
+        store, run_id, authority, "developer", correction["manifest_sha256"],
+    )
+    assert main(resume) == 0
+    quality = json.loads(capsys.readouterr().out)
+    assert (quality["stage"], quality["status"]) == ("quality", "WAITING_FOR_APPROVAL")
+    verification.approve_quality(store, run_id, authority, "reviewer", quality["verification_sha256"])
     assert main(resume) == 0
     paused = json.loads(capsys.readouterr().out)
     assert (paused["stage"], paused["status"]) == ("review", "WAITING_FOR_APPROVAL")

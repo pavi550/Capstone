@@ -604,6 +604,26 @@ def _dev_status(args):
 
 
 def _dev_decision(args):
+    if args.development_sha256:
+        if not args.config:
+            raise ValueError("Development artifact decisions need a trusted --config")
+        from . import verification
+
+        authority = LocalApprovalAuthority(Config.load(args.config))
+        decision_args = (SpecificationStore(args.store), args.run_id, authority, args.actor)
+        if args.dev_command == "reject":
+            return verification.reject_development(*decision_args, args.development_sha256, args.reason)
+        return verification.approve_development(*decision_args, args.development_sha256)
+    if args.quality_sha256:
+        if not args.config:
+            raise ValueError("Quality decisions need a trusted --config")
+        from . import verification
+
+        authority = LocalApprovalAuthority(Config.load(args.config))
+        decision_args = (SpecificationStore(args.store), args.run_id, authority, args.actor)
+        if args.dev_command == "reject":
+            return verification.reject_quality(*decision_args, args.quality_sha256, args.reason)
+        return verification.approve_quality(*decision_args, args.quality_sha256)
     if args.review_sha256:
         from .verification import approve_review, reject_review
 
@@ -637,6 +657,10 @@ def _dev_workflow(args):
 
     store = SpecificationStore(args.store)
     if args.dev_command == "workflow-start":
+        if args.experiment and (not args.issue or args.run_id):
+            raise ValueError("Experiment workflows require the issue key and do not accept --run-id")
+        if not args.experiment and bool(args.issue) == bool(args.run_id):
+            raise ValueError("Specify exactly one Jira issue key or an existing --run-id")
         if bool(args.experiment) != bool(args.trial):
             raise ValueError("Specify both --experiment and --trial")
         trial = None
@@ -648,10 +672,17 @@ def _dev_workflow(args):
             run_id = trial["run_id"]
             if store.get(run_id)["draft"]["issue"] != args.issue:
                 raise ValueError("Workflow issue does not match the scheduled trial")
+            issue = args.issue
+        elif args.run_id:
+            run_id = args.run_id
+            issue = store.get(run_id)["draft"]["issue"]
+            if store.get(run_id)["status"] not in {"APPROVED", "AWAITING_APPROVAL"}:
+                raise ValueError("Workflow run must reference a stored specification awaiting or holding approval")
         else:
             run_id = store.begin_intake(args.issue)
+            issue = args.issue
         plan = {
-            "issue": args.issue, "config": str(Path(args.config).resolve()),
+            "issue": issue, "config": str(Path(args.config).resolve()),
             "repo": str((args.experiment / args.trial if trial else args.repo).resolve()),
             "out": str(args.out.resolve()), "acceptance": str(args.acceptance_dir.resolve()),
             "verifier": args.actor, "mode": args.mode,
@@ -659,6 +690,8 @@ def _dev_workflow(args):
             "provider_required": args.allow_provider,
         }
         with closing(store._connect()) as conn, conn:
+            if conn.execute("SELECT 1 FROM unified_runs WHERE run_id=?", (run_id,)).fetchone():
+                raise ValueError("This run already has a workflow plan; use workflow-resume")
             conn.execute("INSERT INTO unified_runs(run_id, plan) VALUES (?, ?)", (run_id, json.dumps(plan)))
     else:
         run_id = args.run_id
@@ -667,8 +700,11 @@ def _dev_workflow(args):
         if not row:
             raise ValueError("Run has no unified workflow plan")
         plan = json.loads(row["plan"])
-    return continue_enterprise(store, run_id, plan, allow_provider=args.allow_provider,
-                               allow_ci=args.authorize_ci, allow_dev=args.authorize_remote_dev)
+    return continue_enterprise(
+        store, run_id, plan, allow_provider=args.allow_provider, allow_ci=args.authorize_ci,
+        allow_dev=args.authorize_remote_dev,
+        allow_correction=getattr(args, "authorize_correction", False),
+    )
 
 
 def _dev_run(args):
@@ -757,6 +793,45 @@ def _export_lifecycle(directory, report):
     scored = report["recorded_receipts"]
     lines = ["# Enterprise lifecycle report", "", f"Run `{report['run_id']}`", "",
              f"Requirement status **{report['requirements_status']}**", ""]
+    for kind, rejection_kind, label, digest_key in (
+        ("development_approval", "development_rejection", "Integrated code/test approval", "manifest_sha256"),
+        ("quality_approval", "quality_rejection", "Independent quality approval", "verification_sha256"),
+        ("review_approval", "review_rejection", "Final review approval", "review_sha256"),
+    ):
+        receipt = scored.get(kind)
+        rejection = scored.get(rejection_kind)
+        outcome = receipt.get("status", "APPROVED") if receipt else (
+            rejection.get("status", "REJECTED") if rejection else "pending"
+        )
+        line = f"- {label}: **{outcome}**"
+        selected = receipt or rejection
+        if selected and selected.get(digest_key):
+            line += f" (`{selected[digest_key]}`)"
+        lines.append(line)
+    verification = scored.get("actual_verification", {})
+    if verification:
+        passed = sum(check["result"] == "PASSED" for check in verification.get("checks", []))
+        total = len(verification.get("checks", []))
+        lines.append(f"- Independent checks passed: {passed}/{total}")
+    review = scored.get("review", {})
+    if review:
+        findings = review.get("findings", [])
+        blocking = sum(item.get("severity") in {"critical", "high"} for item in findings)
+        lines.append(f"- Review findings: {len(findings)} total, {blocking} blocking")
+    metrics = report["metrics"]
+    lines.append(
+        f"- Generated files in latest attempt: {metrics['development']['code_files']} production, "
+        f"{metrics['development']['test_files']} test across {metrics['development']['attempts']} attempt(s)"
+    )
+    lines.append(
+        "- Changed lines in latest attempt: "
+        f"{metrics['development']['diff']['code_lines_added']} added/"
+        f"{metrics['development']['diff']['code_lines_removed']} removed in production; "
+        f"{metrics['development']['diff']['test_lines_added']} added/"
+        f"{metrics['development']['diff']['test_lines_removed']} removed in tests"
+    )
+    confirmed = metrics["independently_adjudicated_defects"]
+    lines.append(f"- Independently adjudicated defects: {confirmed if confirmed is not None else 'unavailable'}")
     for phase in ("first_pass", "final"):
         result = scored.get(f"{phase}_score")
         if result:
@@ -780,13 +855,46 @@ def _dev_report(args):
     store = SpecificationStore(args.store)
     record = store.get(args.run_id)
     receipts = {}
-    for kind in ("verification", "actual_verification", "first_pass_score", "review", "review_approval", "review_rejection", "review_adjudication",
+    for kind in ("development_approval", "development_rejection", "verification", "actual_verification",
+                 "first_pass_score", "quality_approval", "quality_rejection", "review", "review_approval",
+                 "review_rejection", "review_adjudication",
                  "validation", "validation_v2", "final_score", "local_review_evidence",
                  "ci_evidence", "ci_review_evidence", "remote_dev_validation"):
         saved = store.receipt(args.run_id, kind, optional=True)
         if saved:
             receipts[kind] = saved.get("payload", saved)
     stages = store.lifecycle_stages(args.run_id)
+    attempts = record["development_attempts"]
+    latest_evidence = (attempts[-1]["evidence"] or {}) if attempts else {}
+    verification = receipts.get("actual_verification", {})
+    checks = verification.get("checks", [])
+    review = receipts.get("review", {})
+    findings = review.get("findings", [])
+    adjudication = receipts.get("review_adjudication")
+    metrics = {
+        "development": {
+            "attempts": len(attempts),
+            "code_files": len(latest_evidence.get("code_files", [])),
+            "test_files": len(latest_evidence.get("test_files", [])),
+            "diff": latest_evidence.get("diff_metrics", {
+                "code_lines_added": 0, "code_lines_removed": 0,
+                "test_lines_added": 0, "test_lines_removed": 0,
+            }),
+            "timings_ms": latest_evidence.get("timings_ms", {}),
+        },
+        "independent_checks": {
+            "passed": sum(check.get("result") == "PASSED" for check in checks),
+            "failed": sum(check.get("result") == "FAILED" for check in checks),
+            "not_passed": sum(check.get("result") != "PASSED" for check in checks),
+        },
+        "review_findings_by_severity": {
+            severity: sum(item.get("severity") == severity for item in findings)
+            for severity in ("critical", "high", "medium", "low", "info")
+        },
+        "independently_adjudicated_defects": (
+            len(adjudication.get("defects", [])) if adjudication is not None else None
+        ),
+    }
     report = {
         "run_id": args.run_id, "issue": record["draft"]["issue"],
         "spec_sha256": record["digest"], "requirements_status": record["status"],
@@ -800,6 +908,7 @@ def _dev_report(args):
         "recovery": recovery_history(store, args.run_id),
         "provider_requests": store.provider_requests(args.run_id),
         "recorded_receipts": receipts,
+        "metrics": metrics,
     }
     if args.output:
         _save_new_json(args.output, report)
@@ -864,9 +973,19 @@ def _dev(args):
             raise ValueError("Supply a stored issue or --run-id")
         if getattr(args, "run_id", None) and hasattr(args, "stored_issue") and not args.store:
             raise ValueError("Run selection requires --store")
-        stage = args.stage if args.dev_command in {"approve", "reject"} else None
-        if (stage == "requirements" and not args.spec_sha256) or (stage == "review" and not args.review_sha256):
-            raise ValueError("Approval stage requires the matching specification or review digest")
+        if args.dev_command in {"approve", "reject"}:
+            stage = args.stage
+            stage_digests = {
+                "requirements": args.spec_sha256,
+                "development": args.development_sha256,
+                "quality": args.quality_sha256,
+                "review": args.review_sha256,
+            }
+            selected_digest = next((name for name in stage_digests if stage_digests[name]), None)
+            if stage and stage_digests[stage] is None:
+                raise ValueError("Approval stage requires the matching digest")
+            if selected_digest and stage and stage != selected_digest:
+                raise ValueError("Approval stage does not match the selected digest")
         registered = {"approve", "reject", "run", "resume", "correct", "code", "testcase", "verify", "testing",
                       "review", "review-adjudicate", "validate", "score", "report", "ci-attest", "criterion-attest", "ci-monitor", "ci-submit"}
         if getattr(args, "run_id", None) and args.dev_command in registered:
@@ -881,7 +1000,7 @@ def _dev(args):
         return 2
     print(json.dumps(result, indent=2, allow_nan=False))
     failed = result.get("status") in {"FAILED", "BLOCKED", "CANCELLED"}
-    return 2 if failed and args.handler in {_dev_run, _dev_verification} else 0
+    return 2 if failed and args.handler in {_dev_run, _dev_verification, _dev_workflow} else 0
 
 
 def _dev_parser(sub):
@@ -940,13 +1059,18 @@ def _dev_parser(sub):
     status.set_defaults(func=_dev, handler=_dev_status)
 
     for name in ("approve", "reject"):
-        decision = commands.add_parser(name, help=f"{name} a stored requirement specification")
+        decision = commands.add_parser(name, help=f"{name} a stored SDLC decision by its exact digest")
         decision.add_argument("--store", type=Path, required=True)
         decision.add_argument("--run-id")
         digest = decision.add_mutually_exclusive_group(required=True)
         digest.add_argument("--spec-sha256")
         digest.add_argument("--review-sha256")
-        decision.add_argument("--stage", choices=("requirements", "review"))
+        digest.add_argument("--development-sha256")
+        digest.add_argument("--quality-sha256")
+        decision.add_argument(
+            "--stage", choices=("requirements", "development", "quality", "review"),
+            help="optional decision stage; when supplied it must match the selected digest",
+        )
         decision.add_argument("--actor", required=True)
         decision.add_argument("--config", help="trusted local approval identity configuration")
         decision.add_argument("--reason", required=(name == "reject"))
@@ -956,10 +1080,14 @@ def _dev_parser(sub):
         workflow = commands.add_parser(name, help="start or resume the complete enterprise SDLC")
         workflow.add_argument("--store", type=Path, required=True)
         workflow.add_argument("--allow-provider", action="store_true")
+        if name == "workflow-resume":
+            workflow.add_argument("--authorize-correction", action="store_true",
+                                  help="authorize one bounded model-backed correction cycle")
         workflow.add_argument("--authorize-ci", action="store_true")
         workflow.add_argument("--authorize-remote-dev", action="store_true")
         if name == "workflow-start":
-            workflow.add_argument("issue")
+            workflow.add_argument("issue", nargs="?")
+            workflow.add_argument("--run-id", help="reuse an existing stored Jira specification")
             workflow.add_argument("--mode", choices=("agent-driven", "agent-assisted", "human-baseline"),
                                   default="agent-driven")
             workflow.add_argument("--config", required=True)

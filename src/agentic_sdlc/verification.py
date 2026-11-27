@@ -36,11 +36,226 @@ def _artifact(store, run_id, authority):
     return decision, evidence, identity
 
 
+def _validate_development_rejection(store, run_id, authority, decision, identity):
+    rejection = store.receipt(run_id, "development_rejection", optional=True)
+    if rejection is None:
+        return None
+    payload = rejection["payload"]
+    authority.require_distinct_approvers(decision["actor"], rejection["actor"])
+    if (any(payload.get(key) != value for key, value in identity.items())
+            or payload.get("status") != "REJECTED" or not payload.get("reason")
+            or not authority.validate_seal(
+                "approvers", "development_rejection", rejection["actor"], payload, rejection["mac"],
+            )):
+        raise ValueError("Development rejection is stale or unauthenticated")
+    return rejection
+
+
+def validate_development_rejection(store, run_id, authority):
+    decision, _evidence, identity = _artifact(store, run_id, authority)
+    return _validate_development_rejection(store, run_id, authority, decision, identity)
+
+
+def _development_approval(store, run_id, authority, decision, identity):
+    rejection = _validate_development_rejection(store, run_id, authority, decision, identity)
+    if rejection is not None:
+        raise ValueError("The integrated code and tests were rejected by a human")
+    receipt = store.receipt(run_id, "development_approval", optional=True)
+    if receipt is None:
+        raise ValueError("A verified human approval of the integrated code and tests is required")
+    payload = receipt["payload"]
+    authority.require_distinct_approvers(decision["actor"], receipt["actor"])
+    if (any(payload.get(key) != value for key, value in identity.items())
+            or payload.get("status") != "APPROVED"
+            or not authority.validate_seal("approvers", "development", receipt["actor"], payload, receipt["mac"])):
+        raise ValueError("Development approval is stale, unauthenticated, or not independent")
+    return receipt
+
+
+def require_development_approval(store, run_id, authority):
+    decision, _evidence, identity = _artifact(store, run_id, authority)
+    return _development_approval(store, run_id, authority, decision, identity)
+
+
+def approve_development(store, run_id, authority, actor, digest):
+    decision, _evidence, identity = _artifact(store, run_id, authority)
+    if digest != identity["manifest_sha256"]:
+        raise ValueError("Development approval digest does not match the integrated code and tests")
+    if store.receipt(run_id, "actual_verification", optional=True) or store.receipt(
+        run_id, "review", optional=True,
+    ):
+        raise ValueError("The integrated artifact can only be approved before testing and review")
+    authority.require_distinct_approvers(decision["actor"], actor)
+    if store.receipt(run_id, "development_rejection", optional=True):
+        raise ValueError("A rejected development artifact cannot be approved")
+    previous = store.receipt(run_id, "development_approval", optional=True)
+    if previous:
+        prior = previous["payload"]
+        if (previous["actor"] == actor and prior.get("status") == "APPROVED"
+                and all(prior.get(key) == value for key, value in identity.items())
+                and authority.validate_seal("approvers", "development", actor, prior, previous["mac"])):
+            return prior
+        raise ValueError("A different development approval is already recorded")
+    payload = {**identity, "status": "APPROVED", "approved_at": datetime.now(UTC).isoformat()}
+    mac = authority.seal("approvers", "development", actor, payload)
+    store.record_receipt(run_id, "development_approval",
+                         {"actor": actor, "payload": payload, "mac": mac},
+                         manifest=identity["manifest_sha256"])
+    return payload
+
+
+def reject_development(store, run_id, authority, actor, digest, reason):
+    decision, _evidence, identity = _artifact(store, run_id, authority)
+    if digest != identity["manifest_sha256"] or not isinstance(reason, str) or not reason.strip() or len(reason) > 2000:
+        raise ValueError("Development rejection requires the exact artifact digest and a bounded reason")
+    if store.receipt(run_id, "actual_verification", optional=True) or store.receipt(
+        run_id, "review", optional=True,
+    ):
+        raise ValueError("The integrated artifact can only be rejected before testing and review")
+    authority.require_distinct_approvers(decision["actor"], actor)
+    if store.receipt(run_id, "development_approval", optional=True):
+        raise ValueError("An approved development artifact cannot be rejected")
+    previous = store.receipt(run_id, "development_rejection", optional=True)
+    if previous:
+        prior = previous["payload"]
+        if (previous["actor"] == actor and prior.get("status") == "REJECTED"
+                and all(prior.get(key) == value for key, value in identity.items())
+                and prior.get("reason") == reason
+                and authority.validate_seal("approvers", "development_rejection", actor, prior, previous["mac"])):
+            return prior
+        raise ValueError("A different development rejection is already recorded")
+    payload = {**identity, "status": "REJECTED", "reason": reason,
+               "rejected_at": datetime.now(UTC).isoformat()}
+    mac = authority.seal("approvers", "development_rejection", actor, payload)
+    store.record_receipt(run_id, "development_rejection",
+                         {"actor": actor, "payload": payload, "mac": mac},
+                         manifest=identity["manifest_sha256"])
+    return payload
+
+
+def _validate_quality_rejection(store, run_id, authority, decision, identity, verification):
+    rejection = store.receipt(run_id, "quality_rejection", optional=True)
+    if rejection is None:
+        return None
+    development = _development_approval(store, run_id, authority, decision, identity)
+    payload = rejection["payload"]
+    authority.require_distinct_approvers(development["actor"], rejection["actor"])
+    authority.require_separation(verification["actor"], rejection["actor"])
+    if (any(payload.get(key) != value for key, value in identity.items())
+            or payload.get("verification_sha256") != _digest(verification)
+            or payload.get("status") != "REJECTED" or not payload.get("reason")
+            or not authority.validate_seal(
+                "approvers", "quality_rejection", rejection["actor"], payload, rejection["mac"],
+            )):
+        raise ValueError("Quality rejection is stale or unauthenticated")
+    return rejection
+
+
+def validate_quality_rejection(store, run_id, authority):
+    decision, evidence, identity = _artifact(store, run_id, authority)
+    verification = _read_verification(
+        store, run_id, authority, decision, identity, evidence, allow_blocked=True,
+    )
+    return _validate_quality_rejection(store, run_id, authority, decision, identity, verification)
+
+
+def _quality_approval(store, run_id, authority, decision, identity, verification):
+    rejection = _validate_quality_rejection(store, run_id, authority, decision, identity, verification)
+    if rejection is not None:
+        raise ValueError("The independent quality result was rejected by a human")
+    receipt = store.receipt(run_id, "quality_approval", optional=True)
+    if receipt is None:
+        raise ValueError("A verified human approval of the independent quality result is required")
+    development = _development_approval(store, run_id, authority, decision, identity)
+    payload = receipt["payload"]
+    authority.require_distinct_approvers(development["actor"], receipt["actor"])
+    authority.require_separation(verification["actor"], receipt["actor"])
+    if (any(payload.get(key) != value for key, value in identity.items())
+            or payload.get("verification_sha256") != _digest(verification)
+            or payload.get("status") != "APPROVED"
+            or not authority.validate_seal("approvers", "quality", receipt["actor"], payload, receipt["mac"])):
+        raise ValueError("Quality approval is stale or unauthenticated")
+    return receipt
+
+
+def require_quality_approval(store, run_id, authority):
+    decision, evidence, identity = _artifact(store, run_id, authority)
+    verification = _read_verification(
+        store, run_id, authority, decision, identity, evidence, allow_blocked=True,
+    )
+    return _quality_approval(store, run_id, authority, decision, identity, verification)
+
+
+def approve_quality(store, run_id, authority, actor, digest):
+    decision, evidence, identity = _artifact(store, run_id, authority)
+    development = _development_approval(store, run_id, authority, decision, identity)
+    verification = _read_verification(
+        store, run_id, authority, decision, identity, evidence, allow_blocked=True,
+    )
+    if verification["payload"]["status"] != "PASSED":
+        raise ValueError("A failed quality result cannot be approved")
+    if digest != _digest(verification):
+        raise ValueError("Quality approval digest does not match the independent verification")
+    authority.require_separation(verification["actor"], actor)
+    authority.require_distinct_approvers(development["actor"], actor)
+    if store.receipt(run_id, "quality_rejection", optional=True):
+        raise ValueError("A rejected quality result cannot be approved")
+    previous = store.receipt(run_id, "quality_approval", optional=True)
+    if previous:
+        prior = previous["payload"]
+        if (previous["actor"] == actor and prior.get("status") == "APPROVED"
+                and prior.get("verification_sha256") == digest
+                and all(prior.get(key) == value for key, value in identity.items())
+                and authority.validate_seal("approvers", "quality", actor, prior, previous["mac"])):
+            return prior
+        raise ValueError("A different quality approval is already recorded")
+    payload = {**identity, "verification_sha256": digest, "status": "APPROVED",
+               "approved_at": datetime.now(UTC).isoformat()}
+    mac = authority.seal("approvers", "quality", actor, payload)
+    store.record_receipt(run_id, "quality_approval", {"actor": actor, "payload": payload, "mac": mac},
+                         manifest=identity["manifest_sha256"])
+    return payload
+
+
+def reject_quality(store, run_id, authority, actor, digest, reason):
+    decision, evidence, identity = _artifact(store, run_id, authority)
+    development = _development_approval(store, run_id, authority, decision, identity)
+    verification = _read_verification(
+        store, run_id, authority, decision, identity, evidence, allow_blocked=True,
+    )
+    if verification["payload"]["status"] != "PASSED":
+        raise ValueError("Failed quality checks already block review; fix or resolve them instead")
+    if digest != _digest(verification) or not isinstance(reason, str) or not reason.strip() or len(reason) > 2000:
+        raise ValueError("Quality rejection requires its exact verification digest and a bounded reason")
+    authority.require_separation(verification["actor"], actor)
+    authority.require_distinct_approvers(development["actor"], actor)
+    if store.receipt(run_id, "quality_approval", optional=True):
+        raise ValueError("An approved quality result cannot be rejected")
+    previous = store.receipt(run_id, "quality_rejection", optional=True)
+    if previous:
+        prior = previous["payload"]
+        if (previous["actor"] == actor and prior.get("status") == "REJECTED"
+                and prior.get("verification_sha256") == digest
+                and prior.get("reason") == reason
+                and all(prior.get(key) == value for key, value in identity.items())
+                and authority.validate_seal("approvers", "quality_rejection", actor, prior, previous["mac"])):
+            return prior
+        raise ValueError("A different quality rejection is already recorded")
+    payload = {**identity, "verification_sha256": digest, "status": "REJECTED", "reason": reason,
+               "rejected_at": datetime.now(UTC).isoformat()}
+    mac = authority.seal("approvers", "quality_rejection", actor, payload)
+    store.record_receipt(run_id, "quality_rejection", {"actor": actor, "payload": payload, "mac": mac},
+                         manifest=identity["manifest_sha256"])
+    return payload
+
+
 def record_verification(store, run_id, authority, actor, result):
     decision, evidence, identity = _artifact(store, run_id, authority)
+    development = _development_approval(store, run_id, authority, decision, identity)
     if evidence["execution_mode"] != "OFFLINE_STUB":
         raise ValueError("Synthetic verification cannot satisfy a configured model run")
     authority.require_separation(actor, decision["actor"])
+    authority.require_separation(actor, development["actor"])
     if not isinstance(result, dict) or any(result.get(key) != value for key, value in identity.items()):
         raise ValueError("Verification result is bound to a different run, specification or manifest")
     checks = result.get("checks")
@@ -62,7 +277,9 @@ def execute_verification(store, run_id, authority, actor, config, acceptance):
     from .container_verifier import DockerVerifier
 
     decision, evidence, identity = _artifact(store, run_id, authority)
+    development = _development_approval(store, run_id, authority, decision, identity)
     authority.require_separation(actor, decision["actor"])
+    authority.require_separation(actor, development["actor"])
     existing = store.receipt(run_id, "actual_verification", optional=True)
     if existing:
         return _read_verification(
@@ -88,6 +305,7 @@ def execute_verification(store, run_id, authority, actor, config, acceptance):
 
 
 def _read_verification(store, run_id, authority, decision, identity, evidence, *, allow_blocked=False):
+    development = _development_approval(store, run_id, authority, decision, identity)
     receipt = store.receipt(run_id, "actual_verification", optional=True)
     purpose = "actual_verification"
     if receipt is None:
@@ -97,6 +315,7 @@ def _read_verification(store, run_id, authority, decision, identity, evidence, *
         receipt = store.receipt(run_id, purpose)
     payload = receipt["payload"]
     authority.require_separation(receipt["actor"], decision["actor"])
+    authority.require_separation(receipt["actor"], development["actor"])
     if (any(payload.get(key) != value for key, value in identity.items())
             or not authority.validate_seal("verifiers", purpose, receipt["actor"], payload, receipt["mac"])):
         raise ValueError("Verification receipt is stale or unauthenticated")
@@ -138,6 +357,8 @@ def _finding_records(findings):
 def review(store, run_id, authority, config, *, allow_provider=False):
     decision, evidence, identity = _artifact(store, run_id, authority)
     verification = _read_verification(store, run_id, authority, decision, identity, evidence)
+    quality = _quality_approval(store, run_id, authority, decision, identity, verification)
+    authority.require_separation(verification["actor"], quality["actor"])
     if config.get("enterprise.delivery_policy.remote_ci.dispatch_ref"):
         initial_ci = _delivery_attestation(store, run_id, authority, decision, identity, "ci_evidence")
         if initial_ci is None:
@@ -278,6 +499,8 @@ def _local_review_receipt(store, run_id, authority, decision, identity, review):
 
 def _review(store, run_id, authority, decision, identity, evidence, *, allow_blocked=False):
     verification = _read_verification(store, run_id, authority, decision, identity, evidence)
+    quality = _quality_approval(store, run_id, authority, decision, identity, verification)
+    authority.require_separation(verification["actor"], quality["actor"])
     bundle = store.receipt(run_id, "review")
     if (any(bundle.get(key) != value for key, value in identity.items())
             or bundle["verification_sha256"] != _digest(verification)):
@@ -289,6 +512,12 @@ def _review(store, run_id, authority, decision, identity, evidence, *, allow_blo
 
 def remediation_context(store, run_id, authority):
     decision, evidence, identity = _artifact(store, run_id, authority)
+    development_rejection = _validate_development_rejection(store, run_id, authority, decision, identity)
+    if development_rejection is not None:
+        rejected = development_rejection["payload"]
+        return {"source_attempt": evidence["attempt"], "source": evidence["artifact_dir"],
+                "manifest_sha256": evidence["manifest_sha256"],
+                "feedback": [{"operator_reason": rejected["reason"]}], "cycle": 0}
     receipt = _read_verification(store, run_id, authority, decision, identity, evidence, allow_blocked=True)
     payload = receipt["payload"]
     if payload["environment"] != "LOCAL_ACTUAL":
@@ -299,6 +528,14 @@ def remediation_context(store, run_id, authority):
             raise ValueError("Infrastructure failures require operator resolution before correction")
         feedback = [{"check": check["check_id"], "exit_code": check["exit_code"]} for check in failed]
     else:
+        quality_rejection = _validate_quality_rejection(
+            store, run_id, authority, decision, identity, receipt,
+        )
+        if quality_rejection is not None:
+            rejected = quality_rejection["payload"]
+            return {"source_attempt": evidence["attempt"], "source": evidence["artifact_dir"],
+                    "manifest_sha256": evidence["manifest_sha256"],
+                    "feedback": [{"operator_reason": rejected["reason"]}], "cycle": 0}
         _, bundle = _review(store, run_id, authority, decision, identity, evidence, allow_blocked=True)
         rejection = store.receipt(run_id, "review_rejection", optional=True)
         if bundle["status"] == "BLOCKED":
@@ -648,10 +885,18 @@ def scoring_inputs(store, run_id, authority, *, include_final=True, config=None)
     decision, evidence, identity = _artifact(store, run_id, authority)
     checks = {}
     observed = store.receipt(run_id, "actual_verification", optional=True)
+    development = store.receipt(run_id, "development_approval", optional=True)
     receipts = {**identity, "attempt_id": evidence["attempt"], "requirements_approval": {
         "actor": decision["actor"], "decided_at": decision["decided_at"],
     }}
-    gates = {"requirements_approval": True}
+    gates = {"requirements_approval": True, "development_approval": False, "quality_approval": False}
+    development_rejection = _validate_development_rejection(store, run_id, authority, decision, identity)
+    if development_rejection is not None:
+        receipts["development_rejection"] = development_rejection["payload"]
+    if development is not None:
+        _development_approval(store, run_id, authority, decision, identity)
+        receipts["development_approval"] = development["payload"]
+        gates["development_approval"] = True
     if observed and config and not config.get("enterprise.delivery_policy.remote_ci.required", False):
         review = store.receipt(run_id, "review", optional=True)
         if review is not None:
@@ -678,6 +923,17 @@ def scoring_inputs(store, run_id, authority, *, include_final=True, config=None)
             independent_tests=all(checks[name] for name in ("acceptance", "regression", "generated", "quality", "definition_of_done")),
             security=checks["security"],
         )
+        quality_approval = store.receipt(run_id, "quality_approval", optional=True)
+        if quality_approval is not None:
+            _quality_approval(store, run_id, authority, decision, identity, observed)
+            receipts["quality_approval"] = quality_approval["payload"]
+            gates["quality_approval"] = True
+        quality_rejection = store.receipt(run_id, "quality_rejection", optional=True)
+        if quality_rejection is not None:
+            quality_rejection = _validate_quality_rejection(
+                store, run_id, authority, decision, identity, observed,
+            )
+            receipts["quality_rejection"] = quality_rejection["payload"]
         ci_checks = receipts.get("ci_evidence", {}).get("evaluator", {}).get("checks", {})
         for criterion, check in (("traceability", "traceability"), ("path_policy", "guardrails"),
                                  ("security", "security"), ("correctness", "acceptance")):

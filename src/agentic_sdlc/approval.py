@@ -35,6 +35,12 @@ class LocalApprovalAuthority:
         ):
             raise ValueError("Verification requires a distinct local verifier identity and key")
 
+    def require_distinct_approvers(self, first: str, second: str) -> None:
+        if first == second or hmac.compare_digest(
+            self._key("approvers", first).encode(), self._key("approvers", second).encode(),
+        ):
+            raise ValueError("This decision requires a distinct local approver identity and key")
+
     def seal(self, role: str, purpose: str, actor: str, payload: dict) -> str:
         message = json.dumps(
             [purpose, actor, payload], sort_keys=True, separators=(",", ":"), ensure_ascii=True,

@@ -453,7 +453,9 @@ class Orchestrator:
         s.deployments = deploy.deploy(self.cfg, self.hitl, s.repo_path)
         self.events.emit("deploy", "promoted", environments=s.deployments)
 
-def continue_enterprise(store, run_id, plan, *, allow_provider=False, allow_ci=False, allow_dev=False):
+def continue_enterprise(
+    store, run_id, plan, *, allow_provider=False, allow_ci=False, allow_dev=False, allow_correction=False,
+):
     """Drive the existing journaled stage handlers from their stored receipts."""
     from argparse import Namespace
     from contextlib import closing
@@ -505,6 +507,20 @@ def continue_enterprise(store, run_id, plan, *, allow_provider=False, allow_ci=F
                                 "AND state IN ('DISPATCHING', 'DISPATCHED', 'COMPLETED')", (run_id,)).fetchall()
         return any(json.loads(row["record"]).get("review_sha256") == digest for row in rows)
 
+    correction_authorized = allow_correction
+
+    def correction_pause(reason, **evidence):
+        nonlocal correction_authorized
+        if not correction_authorized:
+            return progress("correction", "PAUSED",
+                            reason=f"{reason}; explicitly authorize correction on resume", **evidence)
+        if not allow_provider:
+            return progress("provider", "PAUSED",
+                            reason="Correction requires the configured provider authorization used when starting this run",
+                            **evidence)
+        correction_authorized = False
+        return None
+
     def drive():
         directory = Path(plan["experiment"]) if plan.get("experiment") else None
         trial = plan.get("trial")
@@ -549,27 +565,77 @@ def continue_enterprise(store, run_id, plan, *, allow_provider=False, allow_ci=F
             if receipt("validation_v2") or receipt("validation"):
                 validation_result = call("validate", _dev_verification)
                 break
-            verified = receipt("actual_verification")
-            if verified is None:
+            development_rejection = receipt("development_rejection")
+            if development_rejection is not None:
+                verification.validate_development_rejection(store, run_id, authority)
+                paused = correction_pause(
+                    "The human rejected the integrated code/test artifact",
+                    manifest_sha256=development["manifest_sha256"],
+                    code_files=development["code_files"],
+                    test_files=development["test_files"],
+                )
+                if paused is not None:
+                    return paused
+                development = call("correct", _dev_run)
+                continue
+            development_approval = receipt("development_approval")
+            if development_approval is None:
+                return progress(
+                    "development", "WAITING_FOR_APPROVAL",
+                    manifest_sha256=development["manifest_sha256"],
+                    artifact_dir=development["artifact_dir"],
+                    code_files=development["code_files"],
+                    test_files=development["test_files"],
+                    timings_ms=development.get("timings_ms"),
+                )
+            verification.require_development_approval(store, run_id, authority)
+
+            verified_record = receipt("actual_verification")
+            if verified_record is None:
                 verified = call("testing", _dev_verification)
+                verified_record = receipt("actual_verification")
             else:
-                verified = verified["payload"]
-            review = receipt("review")
+                verified = verified_record["payload"]
+
             if verified["status"] == "PASSED":
+                quality_rejection = receipt("quality_rejection")
+                if quality_rejection is not None:
+                    verification.validate_quality_rejection(store, run_id, authority)
+                    paused = correction_pause(
+                        "The human rejected the quality evidence",
+                        verification_sha256=verification._digest(verified_record),
+                        checks=verified["checks"],
+                    )
+                    if paused is not None:
+                        return paused
+                    development = call("correct", _dev_run)
+                    continue
+                quality_approval = receipt("quality_approval")
+                if quality_approval is None:
+                    score = receipt("first_pass_score")
+                    return progress(
+                        "quality", "WAITING_FOR_APPROVAL",
+                        verification_sha256=verification._digest(verified_record),
+                        checks=verified["checks"],
+                        first_pass_score=score,
+                    )
+                verification.require_quality_approval(store, run_id, authority)
+
                 if remote_ci and not receipt("ci_evidence"):
                     if not ci_allowed(False):
                         return progress("ci-initial", "PAUSED", reason="Authorize trusted CI submission on resume")
                     stage("ci-initial", lambda: verification.submit_ci(
                         store, run_id, authority, config, args.actor, include_review=False, authorized=allow_ci,
                     ))
-                if review is None:
-                    review = call("review", _dev_verification)
-                if remote_ci and not receipt("ci_review_evidence"):
-                    if not ci_allowed(True):
-                        return progress("ci-review", "PAUSED", reason="Authorize independent CI review on resume")
-                    stage("ci-review", lambda: verification.submit_ci(
-                        store, run_id, authority, config, args.actor, include_review=True, authorized=allow_ci,
-                    ))
+            review = receipt("review")
+            if verified["status"] == "PASSED" and review is None:
+                review = call("review", _dev_verification)
+            if verified["status"] == "PASSED" and remote_ci and not receipt("ci_review_evidence"):
+                if not ci_allowed(True):
+                    return progress("ci-review", "PAUSED", reason="Authorize independent CI review on resume")
+                stage("ci-review", lambda: verification.submit_ci(
+                    store, run_id, authority, config, args.actor, include_review=True, authorized=allow_ci,
+                ))
             if review is not None and not remote_ci and (config.get("enterprise.delivery_policy.local_review.reference_dir")
                                   or config.get("enterprise.delivery_policy.local_review.required", False)):
                 local = stage("local-review", lambda: verification.local_review_evaluation(
@@ -582,8 +648,17 @@ def continue_enterprise(store, run_id, plan, *, allow_provider=False, allow_ci=F
                 ):
                     return progress("local-review", "PAUSED", reason=local["reason"])
             if verified["status"] != "PASSED" or review["status"] == "BLOCKED" or receipt("review_rejection"):
-                if not allow_provider:
-                    return progress("correction", "PAUSED", reason="Authorize model-backed correction on resume")
+                paused = correction_pause(
+                    "Independent checks or review require a correction",
+                    manifest_sha256=development["manifest_sha256"],
+                    verification_sha256=verification._digest(verified_record),
+                    review_sha256=verification._digest(review) if review is not None else None,
+                    checks=verified["checks"],
+                    review_status=review.get("status") if review is not None else None,
+                    review_findings=review.get("findings", []) if review is not None else [],
+                )
+                if paused is not None:
+                    return paused
                 development = call("correct", _dev_run)
                 continue
             if not receipt("review_approval"):

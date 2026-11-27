@@ -29,8 +29,13 @@ def draft():
 @pytest.fixture
 def approval_config(monkeypatch, tmp_path):
     path = tmp_path / "policy.yaml"
-    path.write_text("enterprise:\n  approvers:\n    reviewer: FIXTURE_APPROVAL_KEY\n", encoding="utf-8")
+    path.write_text(
+        "enterprise:\n  approvers:\n    reviewer: FIXTURE_APPROVAL_KEY\n"
+        "    developer: FIXTURE_DEVELOPMENT_KEY\n",
+        encoding="utf-8",
+    )
     monkeypatch.setenv("FIXTURE_APPROVAL_KEY", "synthetic-fixture-key-of-at-least-32-bytes")
+    monkeypatch.setenv("FIXTURE_DEVELOPMENT_KEY", "synthetic-development-key-of-at-least-32-bytes")
     return path
 
 
@@ -88,6 +93,86 @@ def test_unsigned_or_tampered_approval_cannot_unlock(draft, approval_config, tmp
         store.develop(run_id, authority, unexpected, 2, inputs={})
 
 
+def test_development_approval_cli_accepts_digest_without_stage(draft, approval_config, tmp_path, capsys):
+    store = SpecificationStore(tmp_path / "spec.db")
+    run_id = store.create(draft)
+    authority = LocalApprovalAuthority(Config.load(approval_config))
+    store.decide(run_id, draft["spec_sha256"], "APPROVED", "reviewer", None, authority)
+    source = tmp_path / "source"
+    source.mkdir()
+    orchestrator = Orchestrator(Config.load())
+    artifact = store.develop(
+        run_id, authority, lambda submitted, attempt: orchestrator.stage_development(
+            submitted, source, tmp_path / "out", run_id, attempt,
+        ), 1, inputs={},
+    )
+
+    assert main([
+        "dev", "approve", "--store", str(store.path), "--run-id", run_id,
+        "--development-sha256", artifact["manifest_sha256"], "--actor", "developer",
+        "--config", str(approval_config),
+    ]) == 0
+    capsys.readouterr()
+    assert store.receipt(run_id, "development_approval")["payload"]["status"] == "APPROVED"
+
+
+def test_development_rejection_is_digest_bound_and_blocks_testing(draft, approval_config, tmp_path):
+    store = SpecificationStore(tmp_path / "spec.db")
+    run_id = store.create(draft)
+    authority = LocalApprovalAuthority(Config.load(approval_config))
+    store.decide(run_id, draft["spec_sha256"], "APPROVED", "reviewer", None, authority)
+    source = tmp_path / "source"
+    source.mkdir()
+    artifact = store.develop(
+        run_id, authority, lambda submitted, attempt: Orchestrator(Config.load()).stage_development(
+            submitted, source, tmp_path / "out", run_id, attempt,
+        ), 1, inputs={},
+    )
+
+    with pytest.raises(ValueError, match="exact artifact digest"):
+        verification.reject_development(store, run_id, authority, "developer", "stale", "Needs changes")
+    verification.reject_development(
+        store, run_id, authority, "developer", artifact["manifest_sha256"], "Needs changes",
+    )
+    with pytest.raises(ValueError, match="rejected by a human"):
+        verification.require_development_approval(store, run_id, authority)
+
+
+def test_quality_rejection_is_bound_to_verification_and_blocks_review(draft, tmp_path, monkeypatch):
+    monkeypatch.setenv("APPROVAL_FIXTURE", "reviewer-fixture-key-of-at-least-32-bytes")
+    monkeypatch.setenv("DEVELOPMENT_FIXTURE", "developer-fixture-key-of-at-least-32-bytes")
+    monkeypatch.setenv("VERIFICATION_FIXTURE", "verifier-fixture-key-of-at-least-32-bytes")
+    cfg = Config.load(overrides={"enterprise": {
+        "approvers": {"reviewer": "APPROVAL_FIXTURE", "developer": "DEVELOPMENT_FIXTURE"},
+        "verifiers": {"verifier": "VERIFICATION_FIXTURE"},
+    }})
+    authority = LocalApprovalAuthority(cfg)
+    store = SpecificationStore(tmp_path / "trusted.db")
+    source = tmp_path / "source"
+    source.mkdir()
+    run_id = store.create(draft)
+    store.decide(run_id, draft["spec_sha256"], "APPROVED", "reviewer", None, authority)
+    artifact = store.develop(
+        run_id, authority, lambda submitted, attempt: Orchestrator(cfg).stage_development(
+            submitted, source, tmp_path / "out", run_id, attempt,
+        ), 1, inputs={},
+    )
+    verification.approve_development(store, run_id, authority, "developer", artifact["manifest_sha256"])
+    result = {
+        "run_id": run_id, "spec_sha256": draft["spec_sha256"],
+        "manifest_sha256": artifact["manifest_sha256"], "environment": "OFFLINE_SIMULATION",
+        "checks": {name: True for name in verification.CHECKS},
+    }
+    verification.record_verification(store, run_id, authority, "verifier", result)
+    digest = verification._digest(store.receipt(run_id, "verification"))
+
+    with pytest.raises(ValueError, match="exact verification digest"):
+        verification.reject_quality(store, run_id, authority, "reviewer", "stale", "Needs changes")
+    verification.reject_quality(store, run_id, authority, "reviewer", digest, "Needs changes")
+    with pytest.raises(ValueError, match="rejected by a human"):
+        verification.review(store, run_id, authority, cfg)
+
+
 def test_agents_run_concurrently_in_separate_workspaces(draft, tmp_path, monkeypatch):
     source = tmp_path / "source"
     source.mkdir()
@@ -110,6 +195,10 @@ def test_agents_run_concurrently_in_separate_workspaces(draft, tmp_path, monkeyp
     result = stage(Orchestrator(Config.load()), draft, source, tmp_path / "out", "fixture", 1)
     assert result["status"] == "READY_FOR_VERIFICATION"
     assert set(result["timings_ms"]) == {"code", "testcase", "parallel", "integration"}
+    assert result["diff_metrics"] == {
+        "code_lines_added": 1, "code_lines_removed": 0,
+        "test_lines_added": 1, "test_lines_removed": 0,
+    }
 
 
 def test_interruption_preserves_attempt_and_resume_starts_next_attempt(draft, approval_config, tmp_path):
@@ -168,9 +257,10 @@ def test_running_stage_rejects_duplicate_and_records_cancellation(draft, approva
 @pytest.mark.parametrize("passed", [True, False])
 def test_independent_gate_and_review_approval_are_required(draft, tmp_path, monkeypatch, passed):
     monkeypatch.setenv("APPROVAL_FIXTURE", "reviewer-fixture-key-of-at-least-32-bytes")
+    monkeypatch.setenv("DEVELOPMENT_FIXTURE", "developer-fixture-key-of-at-least-32-bytes")
     monkeypatch.setenv("VERIFICATION_FIXTURE", "verifier-fixture-key-of-at-least-32-bytes")
     cfg = Config.load(overrides={"enterprise": {
-        "approvers": {"reviewer": "APPROVAL_FIXTURE"},
+        "approvers": {"reviewer": "APPROVAL_FIXTURE", "developer": "DEVELOPMENT_FIXTURE"},
         "verifiers": {"verifier": "VERIFICATION_FIXTURE"},
     }})
     authority = LocalApprovalAuthority(cfg)
@@ -185,6 +275,9 @@ def test_independent_gate_and_review_approval_are_required(draft, tmp_path, monk
             submitted, source, tmp_path / "out", run_id, attempt,
         ), 2, inputs={},
     )
+    verification.approve_development(
+        store, run_id, authority, "developer", artifact["manifest_sha256"],
+    )
     attestation = {
         "run_id": run_id, "spec_sha256": draft["spec_sha256"],
         "manifest_sha256": artifact["manifest_sha256"], "environment": "OFFLINE_SIMULATION",
@@ -197,6 +290,11 @@ def test_independent_gate_and_review_approval_are_required(draft, tmp_path, monk
         with pytest.raises(ValueError, match="mandatory gate"):
             verification.review(store, run_id, authority, cfg)
         return
+    with pytest.raises(ValueError, match="quality result"):
+        verification.review(store, run_id, authority, cfg)
+    verification.approve_quality(
+        store, run_id, authority, "reviewer", verification._digest(store.receipt(run_id, "verification")),
+    )
     result = verification.review(store, run_id, authority, cfg)
     assert result["status"] == "WAITING_REVIEW_APPROVAL"
     with pytest.raises(ValueError, match="Missing review_approval"):

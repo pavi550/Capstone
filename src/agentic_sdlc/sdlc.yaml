@@ -100,7 +100,7 @@ evaluation:
   index_weights: {quality: 0.4, delivery_time: 0.25, human_effort: 0.25, cost: 0.1}
   rubric:
     version: "1.0"
-    mandatory_gates: [requirements_approval, independent_tests, security, review_approval, dev_validation]
+    mandatory_gates: [requirements_approval, development_approval, independent_tests, quality_approval, security, review_approval, dev_validation]
     criteria:
       requirements: {extraction: 3, criteria_completeness: 3, ambiguity: 2, traceability: 2}
       code: {correctness: 8, completeness: 5, maintainability: 4, scope: 3}

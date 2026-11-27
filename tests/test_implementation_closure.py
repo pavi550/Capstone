@@ -618,7 +618,41 @@ def test_report_exports_same_missing_measurements(tmp_path):
     assert "Unavailable" in (output / "experiment.md").read_text(encoding="utf-8")
 
 
-def test_unified_workflow_pauses_at_both_approvals_and_orders_ci(tmp_path, monkeypatch):
+def test_workflow_start_reuses_approved_specification(tmp_path, monkeypatch, capsys):
+    from agentic_sdlc import cli, orchestrator
+
+    monkeypatch.setenv("SPEC_APPROVER_KEY", "approved-specification-fixture-key")
+    cfg = Config.load(overrides={"enterprise": {"approvers": {"reviewer": "SPEC_APPROVER_KEY"}}})
+    store = SpecificationStore(tmp_path / "workflow.db")
+    draft = {"issue": "FIX-9", "title": "Fixture", "description": "Reused specification",
+             "acceptance_criteria": [{"text": "The result is observable"}], "status": "AWAITING_APPROVAL"}
+    draft["spec_sha256"] = specification_digest(draft)
+    run_id = store.create(draft)
+    store.decide(run_id, draft["spec_sha256"], "APPROVED", "reviewer", None, LocalApprovalAuthority(cfg))
+    config_path = tmp_path / "policy.yaml"
+    config_path.write_text("fixture", encoding="utf-8")
+    captured = {}
+
+    def continue_run(_store, selected_run, plan, **_kwargs):
+        captured.update(run_id=selected_run, plan=plan)
+        return {"run_id": selected_run, "stage": "development", "status": "WAITING_FOR_APPROVAL"}
+
+    monkeypatch.setattr(orchestrator, "continue_enterprise", continue_run)
+    args = [
+        "dev", "workflow-start", "--run-id", run_id, "--store", str(store.path),
+        "--config", str(config_path), "--repo", str(tmp_path / "source"),
+        "--out", str(tmp_path / "output"), "--acceptance-dir", str(tmp_path / "acceptance"),
+        "--actor", "verifier",
+    ]
+    assert cli.main(args) == 0
+    capsys.readouterr()
+    assert captured["run_id"] == run_id
+    assert captured["plan"]["issue"] == "FIX-9"
+    assert cli.main(args) == 2
+    assert "use workflow-resume" in capsys.readouterr().err
+
+
+def test_unified_workflow_pauses_at_approval_gates_and_orders_ci(tmp_path, monkeypatch):
     from agentic_sdlc import cli, orchestrator, verification
 
     store, run_id = store_run(tmp_path)
@@ -644,7 +678,11 @@ def test_unified_workflow_pauses_at_both_approvals_and_orders_ci(tmp_path, monke
     def generate(_args):
         if "generation" not in calls:
             calls.append("generation")
-        return {"status": "READY_FOR_VERIFICATION"}
+        return {
+            "status": "READY_FOR_VERIFICATION", "manifest_sha256": "a" * 64,
+            "artifact_dir": str(tmp_path / "out"), "code_files": ["app.py"],
+            "test_files": ["tests/test_app.py"], "timings_ms": {},
+        }
 
     def verify(args):
         stage = args.dev_command
@@ -670,6 +708,8 @@ def test_unified_workflow_pauses_at_both_approvals_and_orders_ci(tmp_path, monke
     monkeypatch.setattr(cli, "_dev_verification", verify)
     monkeypatch.setattr(cli, "_dev_report", lambda _args: {"status": "COMPLETED"})
     monkeypatch.setattr(verification, "submit_ci", ci_submit)
+    monkeypatch.setattr(verification, "require_development_approval", lambda *_args: True)
+    monkeypatch.setattr(verification, "require_quality_approval", lambda *_args: True)
     monkeypatch.setattr(store, "receipt", lambda _run, kind, **_kwargs: receipts.get(kind))
     monkeypatch.setattr(store, "approved_specification", lambda *_args: draft)
 
@@ -679,12 +719,20 @@ def test_unified_workflow_pauses_at_both_approvals_and_orders_ci(tmp_path, monke
     assert calls == ["requirements"]
     with closing(store._connect()) as db, db:
         db.execute("UPDATE specifications SET status='APPROVED' WHERE run_id=?", (run_id,))
+    before_approval = orchestrator.continue_enterprise(store, run_id, plan, allow_ci=True)
+    assert before_approval["stage"] == "development"
+    assert before_approval["status"] == "WAITING_FOR_APPROVAL"
+    receipts["development_approval"] = {"payload": {"status": "APPROVED"}}
+    quality_wait = orchestrator.continue_enterprise(store, run_id, plan, allow_ci=True)
+    assert quality_wait["stage"] == "quality"
+    assert quality_wait["status"] == "WAITING_FOR_APPROVAL"
+    receipts["quality_approval"] = {"payload": {"status": "APPROVED"}}
     before_ci = orchestrator.continue_enterprise(store, run_id, plan)
     assert before_ci["stage"] == "ci-initial"
     assert before_ci["status"] == "PAUSED"
-    before_approval = orchestrator.continue_enterprise(store, run_id, plan, allow_ci=True)
-    assert before_approval["stage"] == "review"
-    assert before_approval["status"] == "WAITING_FOR_APPROVAL"
+    before_review = orchestrator.continue_enterprise(store, run_id, plan, allow_ci=True)
+    assert before_review["stage"] == "review"
+    assert before_review["status"] == "WAITING_FOR_APPROVAL"
     assert calls == ["requirements", "generation", "testing", "ci_evidence", "review", "ci_review_evidence"]
     receipts["review_approval"] = {"status": "APPROVED"}
     result = orchestrator.continue_enterprise(store, run_id, plan)
