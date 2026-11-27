@@ -11,6 +11,10 @@ broaden the approved requirement. The enterprise workflow creates production
 code and independent tests in isolated workspaces; do not use the standalone
 `dev code` draft command for the approval-bound workflow.
 
+Run the backend operations yourself. Do not ask the user to run or copy
+`agentic_sdlc` commands, and do not show command syntax or flags in chat.
+Communicate only the next slash-command action.
+
 Ask for the approved requirement `run_id`, approval store, trusted policy
 YAML, source repository path, separate output directory, trusted independent
 acceptance-test directory, verifier identity, and whether the user explicitly
@@ -39,10 +43,10 @@ Only after explicit approval record the decision:
 python -m agentic_sdlc dev approve --store STORE --run-id RUN_ID --development-sha256 MANIFEST_SHA256 --stage development --actor APPROVER --config POLICY
 ```
 
-For rejection use `dev reject` with the same digest and the user's reason.
-If the user requests a model-backed correction, resume only with
-`--authorize-correction` and the same provider authorization used at workflow
-start; this authorizes one bounded correction cycle, creates a new manifest,
-and returns to this approval gate. Do not run testing, review, merge, or
-deployment from this skill. Do not claim tests passed or release gates were
-satisfied.
+For rejection, record the user's reason against the same digest. If the user
+requests a model-backed correction, obtain explicit confirmation and record
+the authorization internally, then use the same provider authorization used
+at workflow start. This authorizes one bounded correction cycle, creates a new
+manifest, and returns to this approval gate. Do not run testing, review,
+merge, or deployment from this skill. Do not claim tests passed or release
+gates were satisfied.

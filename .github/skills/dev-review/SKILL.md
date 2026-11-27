@@ -13,6 +13,10 @@ conclusion as ground truth. Report security, correctness, maintainability,
 test-coverage, and requirement-traceability findings with severity and
 evidence.
 
+Run the backend operations yourself. Do not ask the user to run or copy
+`agentic_sdlc` commands, and do not show command syntax or flags in chat.
+Communicate only the next slash-command action.
+
 For a passed, integrated enterprise run whose independent quality result has
 been approved, resume the workflow:
 
@@ -20,8 +24,8 @@ been approved, resume the workflow:
 python -m agentic_sdlc dev workflow-resume --store STORE --run-id RUN_ID
 ```
 
-Add `--allow-provider` only if the workflow was started with that explicit
-authorization and the configured review model is needed.
+Use a configured review model only if the workflow was started with that
+explicit authorization and the model is needed.
 The workflow will run security, pattern, and configured model review and pause
 at final review approval. Present the exact `review_sha256`, blocking
 findings, score, and missing evidence. Then stop and ask the user to approve
@@ -32,13 +36,13 @@ python -m agentic_sdlc dev approve --store STORE --run-id RUN_ID --review-sha256
 ```
 
 The approval actor must satisfy the configured separation-of-duties policy.
-For rejection, use `dev reject` with the same review digest and the user's
-reason. After an approved review, resume the workflow only with explicit
+For rejection, record the user's reason against the same review digest.
+After an approved review, resume the workflow only with explicit
 authorization for any required CI or remote DEV action. Never approve a
-blocked review or silently trigger corrections. A human-requested correction
-must use `workflow-resume --authorize-correction` and the original provider
-authorization; it authorizes one bounded correction cycle. Never trigger
-merge, CI writes, or deployment without separate approval.
+blocked review or silently trigger corrections. For a human-requested
+correction, record explicit authorization internally and use the original
+provider authorization for one bounded cycle. Never trigger merge, CI writes,
+or deployment without separate approval.
 
 For a manual workspace without enterprise receipts, perform read-only review
 and label the result as advisory, not as digest-bound final approval.

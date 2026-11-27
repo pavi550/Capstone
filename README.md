@@ -410,7 +410,12 @@ Design principles:
 * **Every agent write goes through guardrails.** No file reaches disk without passing `guardrails.py`.
 * **Every step is audited.** Each node entry and outcome is appended to `events.jsonl`.
 
-### Quick start
+### Legacy CLI smoke test (maintainers only)
+
+For the user-facing, human-approved SDLC, use only the Copilot slash commands
+in VS Code as described in the [AI-SDLC Framework Guide](docs/AI-SDLC-Framework-Guide.md).
+The command-line example below is a maintainer smoke test for the legacy
+runner, not an alternative user workflow.
 
 ```bash
 pip install -e .
@@ -793,7 +798,11 @@ Each run writes to `<project.output_dir>/<run-id>/` (default `.agentic_sdlc/runs
 | `release_notes.md` | Delivered and not-delivered requirements |
 | `CONCERN.md` | Only when a concern was raised: the reason the run stopped |
 
-### Command line
+### Legacy CLI reference (maintainers only)
+
+This reference is for maintainers debugging the legacy runner. End users should
+use the Copilot slash commands; do not combine this CLI with the guided
+workflow.
 
 ```text
 python -m agentic_sdlc run --requirements FILE [FILE ...] [--repo PATH] [--config YAML]
@@ -859,25 +868,19 @@ of them can be overridden with `repo.*_command`.
 
 ### Enterprise intake and research evidence
 
-Use `dev backlog`, `dev spec`, `dev context`, `dev score`, and `dev compare`
-for the new read-only intake and independent evaluation commands. The
-[implementation checklist and offline reproduction guide](docs/enterprise-implementation.md)
-records current coverage, commands, and remaining work.
-See the [AI-SDLC Framework Guide](docs/AI-SDLC-Framework-Guide.md) for a
-human-friendly setup, workflow, artifact, metrics, and current-capability guide.
-Copilot slash-command skills are available under `.github/skills/`; they
-coordinate the existing CLI stages and pause for human decisions. Skill
-commands use lowercase hyphenated names (for example, `/dev-code`).
-The guide documents both the offline approval demo and the local Docker
-verification fixture. The setup wizard saves Jira and Confluence settings in
-the ignored `.env` file. From the repository root, run
-`python -m agentic_sdlc dev backlog` or `python -m agentic_sdlc dev context PAGE_ID`.
-If you ran setup before it saved a backlog query, run the Jira setup
-again or add `JIRA_JQL` to your existing `.env`. Use `dev spec ISSUE --store DB
---allow-provider` to add advisory analysis from a configured OpenAI-compatible
-loopback model before requesting requirement approval. Add `--page-id ID` for
-each authorized Confluence page. A reported mandatory gap blocks the draft,
-and Jira acceptance criteria retain their original IDs and text.
+Use Copilot Agent in VS Code as the single user-facing workflow. Skills are
+available under `.github/skills/`; start with `/sdlc-orchestrator` or invoke an
+individual stage such as `/requirement`, `/dev-code`, `/dev-testing`,
+`/quality-check`, or `/dev-review`. They run the existing workflow engine
+internally and pause for human decisions. Do not separately run enterprise
+`dev` commands as another workflow. The [AI-SDLC Framework Guide](docs/AI-SDLC-Framework-Guide.md)
+explains setup and use. The [enterprise implementation checklist](docs/enterprise-implementation.md)
+is a maintainer-only reference for backend commands, coverage, and remaining
+work.
+
+The setup wizard saves Jira and Confluence settings in the ignored `.env`
+file. If Jira setup did not save a backlog query, configure `JIRA_JQL` through
+the setup wizard before invoking `/requirement`.
 
 ### Live integrations
 

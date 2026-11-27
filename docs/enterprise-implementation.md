@@ -1,5 +1,10 @@
 # Enterprise implementation checklist
 
+> **Maintainer reference:** command examples in this document operate the
+> backend directly for implementation, debugging, and reproduction. They are
+> not a second user workflow. End users should use the Copilot slash commands
+> in the [AI-SDLC Framework Guide](./AI-SDLC-Framework-Guide.md).
+
 The sequential closure pass tracks pending clauses in [the requirements matrix](implementation-requirements-matrix.md). The matrix contains a clause extraction and an initial lifecycle audit. Finish auditing the individual entries before implementing additional functionality. The first unresolved lifecycle entry is `WS-1-006`.
 
 ## Workstream 1 recovery checkpoint

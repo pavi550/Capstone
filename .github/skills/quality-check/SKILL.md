@@ -11,6 +11,10 @@ run or alter checks, edit implementation or tests, skip failures, or lower
 thresholds. This skill evaluates already-recorded independent verification
 evidence; `/dev-testing` is responsible for executing the approved checks.
 
+Run the backend operations yourself. Do not ask the user to run or copy
+`agentic_sdlc` commands, and do not show command syntax or flags in chat.
+Communicate only the next slash-command action.
+
 Ask for the workflow run ID, trusted approval store, policy configuration,
 and decision-maker identity. Read the persisted workflow status and report:
 
@@ -34,7 +38,7 @@ python -m agentic_sdlc dev approve --store STORE --run-id RUN_ID --quality-sha25
 
 Reject with `dev reject` using the same digest and the user's reason. Never
 approve a failed result or advance to review on the user's behalf. If the
-human rejects passing evidence and requests a correction, resume only with
-`--authorize-correction` and the original provider authorization; this
-authorizes one bounded correction cycle, and the corrected artifact must pass
-through development approval and independent verification again.
+human rejects passing evidence and requests a correction, record the explicit
+decision internally and use the original provider authorization for one
+bounded correction cycle. The corrected artifact must pass through
+development approval and independent verification again.
