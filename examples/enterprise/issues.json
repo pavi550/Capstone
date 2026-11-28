@@ -1,0 +1,11 @@
+{
+  "issues": [
+    {
+      "key": "DEMO-1",
+      "fields": {
+        "summary": "Synthetic calculator example",
+        "description": "Add subtraction to the disposable example calculator.\nAcceptance criteria:\n- Subtract returns the difference.\n- Negative results are supported."
+      }
+    }
+  ]
+}

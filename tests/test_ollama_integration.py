@@ -36,6 +36,7 @@ def run_jira_with_fixture(monkeypatch, capsys):
         return server_parameters(command=command, args=["-u", str(SERVER)], env={
             "PYTHONUTF8": "1",
             "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
+            "CAPSTONE_ENV_FILE": os.environ["CAPSTONE_ENV_FILE"],
         })
 
     monkeypatch.setattr(ai_orchestrator, "settings", lambda: VALUES.copy())

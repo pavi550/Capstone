@@ -14,6 +14,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 
 from . import cicd, deploy, docs, jira
 from .agents.coding import CodingAgent
@@ -49,16 +50,28 @@ class Graph:
 
     def run(self, state: RunState, start: str, events: EventLog, max_steps: int) -> str:
         node = start
+        attempts: dict[tuple[str, str | None], int] = {}
         while node not in (END, HALT):
             if len(state.history) >= max_steps:
                 state.concern = f"state machine exceeded loops.max_steps={max_steps}"
                 node = HALT
                 break
             state.history.append(node)
-            events.emit(node, "enter", requirement=state.current, phase=state.phase)
-            self.nodes[node](state)
-            route = self.edges[node]
-            node = route(state) if callable(route) else route
+            key = (node, state.current)
+            attempts[key] = attempts.get(key, 0) + 1
+            metadata = {"requirement": state.current, "phase": state.phase, "attempt": attempts[key]}
+            events.emit(node, "enter", **metadata)
+            started = perf_counter()
+            status = "FAILED"
+            try:
+                self.nodes[node](state)
+                route = self.edges[node]
+                next_node = route(state) if callable(route) else route
+                status = "BLOCKED" if next_node == HALT else "COMPLETED"
+            finally:
+                events.emit(node, "exit", status=status,
+                            duration_ms=round((perf_counter() - started) * 1000, 3), **metadata)
+            node = next_node
         state.history.append(node)
         events.emit(node, "finish", concern=state.concern)
         return node
@@ -95,6 +108,13 @@ class Orchestrator:
         self.build_graph().run(self.state, "start", self.events, self.cfg.get("loops.max_steps"))
         self.state.outputs["events"] = str(self.events.path)
         return self.state
+
+    def stage_development(
+        self, draft: dict, source: Path, output: Path, run_id: str, attempt: int, *, allow_provider=False,
+    ) -> dict:
+        from .development import stage
+
+        return stage(self, draft, source, output, run_id, attempt, allow_provider=allow_provider)
 
     def build_graph(self) -> Graph:
         g = Graph()
@@ -432,3 +452,248 @@ class Orchestrator:
     def deploy(self, s: RunState) -> None:
         s.deployments = deploy.deploy(self.cfg, self.hitl, s.repo_path)
         self.events.emit("deploy", "promoted", environments=s.deployments)
+
+def continue_enterprise(
+    store, run_id, plan, *, allow_provider=False, allow_ci=False, allow_dev=False, allow_correction=False,
+):
+    """Drive the existing journaled stage handlers from their stored receipts."""
+    from argparse import Namespace
+    from contextlib import closing
+
+    from . import verification
+    from .approval import LocalApprovalAuthority
+    from .cli import _dev_report, _dev_run, _dev_spec, _dev_verification
+    from .config import Config
+    from .experiments import _digest as experiment_digest
+    from .experiments import _trial_snapshot, enforce_policy, export_report, summarize
+    from .lifecycle import child, execute
+
+    config = Config.load(plan["config"], local_model=allow_provider)
+    authority = LocalApprovalAuthority(config)
+    remote_ci = config.get("enterprise.delivery_policy.remote_ci.required", False)
+    remote_dev = config.get("enterprise.remote_dev.required", False)
+
+    def receipt(kind):
+        return store.receipt(run_id, kind, optional=True)
+
+    def progress(stage, status, **fields):
+        result = {"run_id": run_id, "stage": stage, "status": status, **fields}
+        with closing(store._connect()) as conn, conn:
+            conn.execute("UPDATE unified_runs SET progress=? WHERE run_id=?", (json.dumps(result), run_id))
+        return result
+
+    def stage(name, callback):
+        progress(name, "RUNNING")
+        return child(name, callback)
+
+    args = Namespace(
+        store=store.path, run_id=run_id, intake_run_id=run_id, config=plan["config"], issue=plan["issue"],
+        repo=Path(plan["repo"]), out=Path(plan["out"]), acceptance_dir=Path(plan["acceptance"]),
+        actor=plan["verifier"], page_id=None, criteria_file=None, allow_provider=allow_provider,
+        authorize_remote_dev=allow_dev, output=None, report_dir=None,
+    )
+
+    def call(name, handler):
+        args.dev_command = name
+        return stage(name, lambda: handler(args))
+
+    def ci_allowed(include_review):
+        if allow_ci:
+            return True
+        review = receipt("review") if include_review else None
+        digest = verification._digest(review) if review is not None else None
+        with closing(store._connect()) as conn:
+            rows = conn.execute("SELECT record FROM ci_submissions WHERE run_id=? "
+                                "AND state IN ('DISPATCHING', 'DISPATCHED', 'COMPLETED')", (run_id,)).fetchall()
+        return any(json.loads(row["record"]).get("review_sha256") == digest for row in rows)
+
+    correction_authorized = allow_correction
+
+    def correction_pause(reason, **evidence):
+        nonlocal correction_authorized
+        if not correction_authorized:
+            return progress("correction", "PAUSED",
+                            reason=f"{reason}; explicitly authorize correction on resume", **evidence)
+        if not allow_provider:
+            return progress("provider", "PAUSED",
+                            reason="Correction requires the configured provider authorization used when starting this run",
+                            **evidence)
+        correction_authorized = False
+        return None
+
+    def drive():
+        directory = Path(plan["experiment"]) if plan.get("experiment") else None
+        trial = plan.get("trial")
+        if plan["mode"] == "human-baseline":
+            if not directory:
+                return progress("human-baseline", "BLOCKED", reason="A human baseline requires a scheduled trial")
+            submitted = directory / (trial["id"] + ".json")
+            measurement = json.loads(submitted.read_text(encoding="utf-8")) if submitted.is_file() else {}
+            if not measurement.get("verifier_mac"):
+                return progress("human-baseline", "PAUSED", reason="Submit independently measured human work")
+            payload = {key: value for key, value in measurement.items() if key not in {"verifier", "verifier_mac"}}
+            experiment = json.loads((directory / "experiment.json").read_text(encoding="utf-8"))
+            if (payload.get("mode") != "HUMAN_BASELINE" or payload.get("trial_id") != trial["id"]
+                    or payload.get("experiment_id") != experiment_digest(experiment)
+                    or not authority.validate_seal("verifiers", "human-baseline", measurement["verifier"],
+                                                   payload, measurement["verifier_mac"])):
+                raise ValueError("Human baseline measurement does not match the scheduled trial")
+            return progress("delivery", measurement["status"], measurement=measurement)
+        if plan.get("provider_required", False) != allow_provider:
+            return progress("provider", "PAUSED", reason="Match the original provider setting and explicitly authorize configured model execution")
+        if trial:
+            experiment = json.loads((directory / "experiment.json").read_text(encoding="utf-8"))
+            expected = experiment["plan"].get("effective_configuration_sha256")
+            if not expected:
+                return progress("policy", "BLOCKED", reason="Bind the experiment to an effective configuration")
+            enforce_policy(store, run_id, config, expected=expected)
+        record = store.get(run_id)
+        if record["draft"].get("intake_pending"):
+            call("requirements", _dev_spec)
+            record = store.get(run_id)
+        if record["status"] != "APPROVED":
+            status = "WAITING_FOR_APPROVAL" if record["status"] == "AWAITING_APPROVAL" else "BLOCKED"
+            return progress("requirements", status, specification_sha256=record["digest"])
+        store.approved_specification(run_id, authority)
+        if plan["mode"] == "agent-assisted":
+            kinds = store.human_effort(run_id)["measured_seconds_by_kind"]
+            if not ({"manual-code", "manual-test"} & kinds.keys()):
+                return progress("assisted", "PAUSED", reason="Record human coding or testing participation")
+        # The development handler checks the existing manifest and resumes incomplete attempts.
+        development = call("resume", _dev_run)
+        while development["status"] == "READY_FOR_VERIFICATION":
+            if receipt("validation_v2") or receipt("validation"):
+                validation_result = call("validate", _dev_verification)
+                break
+            development_rejection = receipt("development_rejection")
+            if development_rejection is not None:
+                verification.validate_development_rejection(store, run_id, authority)
+                paused = correction_pause(
+                    "The human rejected the integrated code/test artifact",
+                    manifest_sha256=development["manifest_sha256"],
+                    code_files=development["code_files"],
+                    test_files=development["test_files"],
+                )
+                if paused is not None:
+                    return paused
+                development = call("correct", _dev_run)
+                continue
+            development_approval = receipt("development_approval")
+            if development_approval is None:
+                return progress(
+                    "development", "WAITING_FOR_APPROVAL",
+                    manifest_sha256=development["manifest_sha256"],
+                    artifact_dir=development["artifact_dir"],
+                    code_files=development["code_files"],
+                    test_files=development["test_files"],
+                    timings_ms=development.get("timings_ms"),
+                )
+            verification.require_development_approval(store, run_id, authority)
+
+            verified_record = receipt("actual_verification")
+            if verified_record is None:
+                verified = call("testing", _dev_verification)
+                verified_record = receipt("actual_verification")
+            else:
+                verified = verified_record["payload"]
+
+            if verified["status"] == "PASSED":
+                quality_rejection = receipt("quality_rejection")
+                if quality_rejection is not None:
+                    verification.validate_quality_rejection(store, run_id, authority)
+                    paused = correction_pause(
+                        "The human rejected the quality evidence",
+                        verification_sha256=verification._digest(verified_record),
+                        checks=verified["checks"],
+                    )
+                    if paused is not None:
+                        return paused
+                    development = call("correct", _dev_run)
+                    continue
+                quality_approval = receipt("quality_approval")
+                if quality_approval is None:
+                    score = receipt("first_pass_score")
+                    return progress(
+                        "quality", "WAITING_FOR_APPROVAL",
+                        verification_sha256=verification._digest(verified_record),
+                        checks=verified["checks"],
+                        first_pass_score=score,
+                    )
+                verification.require_quality_approval(store, run_id, authority)
+
+                if remote_ci and not receipt("ci_evidence"):
+                    if not ci_allowed(False):
+                        return progress("ci-initial", "PAUSED", reason="Authorize trusted CI submission on resume")
+                    stage("ci-initial", lambda: verification.submit_ci(
+                        store, run_id, authority, config, args.actor, include_review=False, authorized=allow_ci,
+                    ))
+            review = receipt("review")
+            if verified["status"] == "PASSED" and review is None:
+                review = call("review", _dev_verification)
+            if verified["status"] == "PASSED" and remote_ci and not receipt("ci_review_evidence"):
+                if not ci_allowed(True):
+                    return progress("ci-review", "PAUSED", reason="Authorize independent CI review on resume")
+                stage("ci-review", lambda: verification.submit_ci(
+                    store, run_id, authority, config, args.actor, include_review=True, authorized=allow_ci,
+                ))
+            if review is not None and not remote_ci and (config.get("enterprise.delivery_policy.local_review.reference_dir")
+                                  or config.get("enterprise.delivery_policy.local_review.required", False)):
+                local = stage("local-review", lambda: verification.local_review_evaluation(
+                    store, run_id, authority, config, args.actor,
+                ))
+                if local["status"] == "NOT_EVALUATED" and review["status"] != "BLOCKED" and not receipt(
+                    "review_rejection",
+                ) and config.get(
+                    "enterprise.delivery_policy.local_review.required", False,
+                ):
+                    return progress("local-review", "PAUSED", reason=local["reason"])
+            if verified["status"] != "PASSED" or review["status"] == "BLOCKED" or receipt("review_rejection"):
+                paused = correction_pause(
+                    "Independent checks or review require a correction",
+                    manifest_sha256=development["manifest_sha256"],
+                    verification_sha256=verification._digest(verified_record),
+                    review_sha256=verification._digest(review) if review is not None else None,
+                    checks=verified["checks"],
+                    review_status=review.get("status") if review is not None else None,
+                    review_findings=review.get("findings", []) if review is not None else [],
+                )
+                if paused is not None:
+                    return paused
+                development = call("correct", _dev_run)
+                continue
+            if not receipt("review_approval"):
+                return progress("review", "WAITING_FOR_APPROVAL", review_sha256=verification._digest(receipt("review")))
+            if remote_dev and not allow_dev and not receipt("remote_dev_intent"):
+                return progress("validate", "PAUSED", reason="Authorize remote DEV on resume")
+            validation_result = call("validate", _dev_verification)
+            break
+        else:
+            return progress("development", development["status"], reason=development.get("reason"))
+        report = call("report", _dev_report)
+        if trial:
+            output = args.out / ("experiment-report-" + uuid.uuid4().hex)
+            report["experiment_report"] = str(output)
+        return progress("delivery", validation_result["status"], report=report)
+
+    def run():
+        try:
+            return drive()
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
+            from .lifecycle import StageCancelled
+
+            if plan.get("trial"):
+                _trial_snapshot(Path(plan["experiment"]), plan["trial"], store, type(exc).__name__)
+            if isinstance(exc, StageCancelled):
+                progress("workflow", "CANCELLED")
+                raise
+            progress("workflow", "BLOCKED", failure_type=type(exc).__name__)
+            raise
+
+    result = execute(store, run_id, "workflow", run)
+    if plan.get("trial") and plan["mode"] != "human-baseline":
+        directory = Path(plan["experiment"])
+        _trial_snapshot(directory, plan["trial"], store, result["status"])
+        if result["stage"] == "delivery":
+            export_report(Path(result["report"]["experiment_report"]),
+                          summarize(directory, config.get("evaluation.index_weights")))
+    return result

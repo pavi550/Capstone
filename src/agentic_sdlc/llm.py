@@ -7,12 +7,16 @@ Every agent call goes through `LLM.complete(task, system, user, context)` and ex
 from __future__ import annotations
 
 import json
+import math
 import re
 from importlib import resources
+from threading import Lock
+from time import perf_counter
 from typing import Any, Protocol
+from urllib.error import URLError
 
 from .config import Config
-from .httpclient import request_json
+from .httpclient import HttpError, request_json
 
 
 class LLM(Protocol):
@@ -121,11 +125,95 @@ class OpenAICompatibleLLM:
 
     def __init__(self, cfg: Config):
         self.cfg = cfg
+        self._usage_lock = Lock()
+        self._usage = []
         self.api_key = cfg.secret("llm.api_key_env")
         if not self.api_key:
             raise RuntimeError(f"env var {cfg.get('llm.api_key_env')} is not set")
 
     def complete(self, task: str, system: str, user: str, context: dict | None = None) -> str:
+        fallback = self.cfg.get("llm.fallback", [])
+        if not isinstance(fallback, list) or len(fallback) > 3:
+            raise ValueError("Configure at most three explicit real-model fallback profiles")
+        clients = [self]
+        if fallback:
+            from .development import validate_provider
+            from .lifecycle import current_stage
+
+            if current_stage.get() is None:
+                raise ValueError("Provider fallback requires a persistent lifecycle stage")
+            for profile in fallback:
+                if not isinstance(profile, dict) or profile.get("provider") not in {"openai", "anthropic", "gemini"}:
+                    raise ValueError("Fallback profiles must select a real model adapter")
+                if any(key in profile for key in ("api_key", "fallback")):
+                    raise ValueError("Fallback profiles use environment-backed authentication")
+                configured = self.cfg.with_overrides({"llm": {**profile, "fallback": []}})
+                validate_provider(configured, True)
+                clients.append(make_llm(configured))
+        for index, client in enumerate(clients):
+            try:
+                content = client._complete_once(task, system, user)
+            except (HttpError, TimeoutError, URLError) as exc:
+                retryable = (isinstance(exc, HttpError) and exc.status in {429, 502, 503, 504}) or isinstance(
+                    getattr(exc, "reason", exc), TimeoutError,
+                )
+                if not retryable or index + 1 == len(clients):
+                    raise
+            else:
+                if client is not self:
+                    with self._usage_lock:
+                        self._usage.extend(client.usage())
+                return content
+        raise RuntimeError("Provider route exhausted")
+
+    def _complete_once(self, task, system, user):
+        limit = self.cfg.get("llm.max_tokens")
+        if limit is not None and (type(limit) is not int or not 1 <= limit <= 32768):
+            raise ValueError("llm.max_tokens must be between 1 and 32768")
+        input_limit = self.cfg.get("llm.max_input_bytes", 200000)
+        if type(input_limit) is not int or not 1 <= input_limit <= 1000000:
+            raise ValueError("llm.max_input_bytes must be between 1 and 1000000")
+        if len(system.encode()) + len(user.encode()) > input_limit:
+            raise ValueError("Model input exceeds the configured byte budget")
+        rates = (self.cfg.get("llm.input_cost_per_million"), self.cfg.get("llm.output_cost_per_million"))
+        if any(rate is not None and (type(rate) not in {int, float} or not math.isfinite(rate) or rate < 0)
+               for rate in rates):
+            raise ValueError("Model pricing must use nonnegative finite rates")
+        from .lifecycle import checkpoint, current_stage
+        from .provider_budget import normalize_usage, reconcile, reserve
+
+        checkpoint()
+        reservation = reserve(current_stage.get(), self.cfg, task, len(system.encode()) + len(user.encode()) + 256,
+                              limit, rates)
+        started = perf_counter()
+        try:
+            reply, content, _input_count, _output_count = self._request(system, user, limit)
+        except BaseException:
+            reconcile(reservation)
+            raise
+        duration_ms = round((perf_counter() - started) * 1000, 3)
+        normalized = normalize_usage(self.name, reply, self.cfg)
+        inputs, outputs = normalized["input_tokens"], normalized["output_tokens"]
+        priced = all(value is not None for value in (*rates, inputs, outputs))
+        cost = (inputs * rates[0] + outputs * rates[1]) / 1_000_000 if priced else None
+        reconcile(reservation, inputs, outputs, cost if self.cfg.get("llm.currency", "USD") == "USD" else None,
+                  status="RECONCILED" if inputs is not None and outputs is not None else "USAGE_UNKNOWN", usage=normalized)
+        checkpoint()
+        recorded_model = reply.get("model")
+        with self._usage_lock:
+            self._usage.append({
+                **normalized,
+                "task": task, "request_id": reservation[1] if reservation else None, "provider": self.name, "configured_model": self.cfg.get("llm.model"),
+                "reported_model": recorded_model if isinstance(recorded_model, str) else None,
+                "input_tokens": inputs,
+                "output_tokens": outputs,
+                "duration_ms": duration_ms,
+                "cost": cost,
+                "currency": self.cfg.get("llm.currency", "USD") if priced else None,
+            })
+        return content
+
+    def _request(self, system, user, limit):
         url = self.cfg.get("llm.base_url").rstrip("/") + "/chat/completions"
         if self.cfg.get("llm.api_version"):
             url += f"?api-version={self.cfg.get('llm.api_version')}"
@@ -137,16 +225,53 @@ class OpenAICompatibleLLM:
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
             "response_format": {"type": "json_object"},
         }
+        if limit is not None:
+            body["max_tokens"] = limit
         reply = request_json(
-            "POST", url, headers={header: value}, body=body, timeout=self.cfg.get("llm.timeout", 120)
+            "POST", url, headers={header: value}, body=body, timeout=self.cfg.get("llm.timeout", 120),
         )
-        return reply["choices"][0]["message"]["content"]
+        usage = reply.get("usage") or {}
+        return reply, reply["choices"][0]["message"]["content"], usage.get("prompt_tokens"), usage.get("completion_tokens")
+
+    def usage(self) -> list[dict]:
+        with self._usage_lock:
+            return [record.copy() for record in sorted(self._usage, key=lambda row: row["task"])]
+
+
+class GeminiLLM(OpenAICompatibleLLM):
+    """Use Google's OpenAI-compatible Gemini endpoint."""
+
+    name = "gemini"
+
+
+class AnthropicLLM(OpenAICompatibleLLM):
+    name = "anthropic"
+
+    def _request(self, system, user, limit):
+        if limit is None:
+            raise ValueError("Anthropic requires llm.max_tokens")
+        body = {"model": self.cfg.get("llm.model"), "max_tokens": limit,
+                "system": system + " Return only the requested JSON object.",
+                "messages": [{"role": "user", "content": user}]}
+        result = request_json(
+            "POST", self.cfg.get("llm.base_url").rstrip("/") + "/messages",
+            headers={"x-api-key": self.api_key, "anthropic-version": "2023-06-01"},
+            body=body, timeout=self.cfg.get("llm.timeout", 120),
+        )
+        content = "".join(block["text"] for block in result["content"] if block["type"] == "text")
+        usage = result.get("usage") or {}
+        return result, content, usage.get("input_tokens"), usage.get("output_tokens")
+
+
+def _usage_count(value):
+    return value if type(value) is int and value >= 0 else None
 
 
 def make_llm(cfg: Config) -> LLM:
     provider = cfg.get("llm.provider", "stub")
     if provider == "stub":
         return StubLLM()
-    if provider == "openai":
-        return OpenAICompatibleLLM(cfg)
-    raise ValueError(f"unknown llm.provider: {provider}")
+    adapter = {"openai": OpenAICompatibleLLM, "gemini": GeminiLLM, "anthropic": AnthropicLLM}.get(provider)
+    if adapter is None:
+        raise ValueError(f"unknown llm.provider: {provider}")
+    return adapter(cfg)

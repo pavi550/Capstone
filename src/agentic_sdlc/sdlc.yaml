@@ -95,3 +95,87 @@ deploy:
   environments: [dev, qa, staging, prod]
   command: null                       # template, e.g. "helm upgrade app ./chart -n {env}"
   dry_run: true
+# Evidence-based research evaluation uses separate evaluator inputs.
+evaluation:
+  index_weights: {quality: 0.4, delivery_time: 0.25, human_effort: 0.25, cost: 0.1}
+  rubric:
+    version: "1.0"
+    mandatory_gates: [requirements_approval, development_approval, independent_tests, quality_approval, security, review_approval, dev_validation]
+    criteria:
+      requirements: {extraction: 3, criteria_completeness: 3, ambiguity: 2, traceability: 2}
+      code: {correctness: 8, completeness: 5, maintainability: 4, scope: 3}
+      testcase: {acceptance_coverage: 4, positive: 2, negative: 2, edges: 2}
+      testing: {functional_tests: 5, regression: 5, coverage: 3, build_lint: 2}
+      review: {defect_detection: 5, finding_accuracy: 4, compliance: 3, actionability: 3}
+      guardrails: {path_policy: 4, secrets: 3, security: 4, permissions: 4}
+      human: {review_effort: 4, corrections: 3, human_changes: 3}
+      validation: {final_acceptance: 2, definition_of_done: 2, artifacts: 1}
+confluence:
+  base_url: null
+  user_env: CONFLUENCE_EMAIL
+  token_env: CONFLUENCE_API_TOKEN
+  max_chars: 10000
+
+# Read-only GitHub Actions evidence collection.
+github:
+  token_env: GITHUB_TOKEN
+  allow_dispatch: false
+  allow_bundle_publication: false
+  bundle_branch: null
+  dispatch_refs: []
+
+enterprise:
+  correction_cycles: 2
+  allowed_model_hosts: []
+  protected_dependency_files: [pyproject.toml, package.json, package-lock.json, requirements.txt, pom.xml, build.gradle]
+  intake:
+    key_env: CAPSTONE_JIRA_RELAY_KEY
+    allow_poll: false
+    retry_limit: 3
+    hosted:
+      enabled: false
+      host: 127.0.0.1
+      port: 8787
+      drain_enabled: false
+      allow_provider: false
+      poll_enabled: false
+      worker_interval_seconds: 60
+    webhook:
+      allow_write: false
+      auto_renew: false
+      renew_before_seconds: 259200
+      renew_retry_seconds: 3600
+      managed_ids: []
+      token_env: CAPSTONE_JIRA_WEBHOOK_OAUTH_TOKEN
+    projects: []
+  jira_write:
+    enabled: false
+    projects: []
+    transitions: {}
+  confluence_write:
+    enabled: false
+    page_ids: []
+  budgets:
+    requirement: {}
+    request: {}
+    agents: {}
+    stages: {}
+    run: {}
+    experiment: {}
+  delivery_policy:
+    local_review:
+      required: false
+      reference_dir: null
+    remote_ci:
+      required: false
+  remote_dev:
+    enabled: false
+    required: false
+    token_env: CAPSTONE_REMOTE_DEV_TOKEN
+    server:
+      enabled: false
+      port: 8788
+      token_env: CAPSTONE_REMOTE_DEV_TOKEN
+      receipt_key_env: CAPSTONE_REMOTE_DEV_RECEIPT_KEY
+      environments: {}
+      artifacts: {}

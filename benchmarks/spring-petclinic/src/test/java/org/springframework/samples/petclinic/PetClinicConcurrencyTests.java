@@ -74,6 +74,8 @@ public class PetClinicConcurrencyTests {
 					map.add("name", duplicatePetName);
 					map.add("birthDate", "2020-01-01");
 					map.add("type", "cat");
+					map.add("breed", "Mixed");
+					map.add("weight", "10.50");
 
 					HttpEntity<MultiValueMap<String, String>> request = new HttpEntity<>(map, headers);
 

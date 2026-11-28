@@ -410,7 +410,12 @@ Design principles:
 * **Every agent write goes through guardrails.** No file reaches disk without passing `guardrails.py`.
 * **Every step is audited.** Each node entry and outcome is appended to `events.jsonl`.
 
-### Quick start
+### Legacy CLI smoke test (maintainers only)
+
+For the user-facing, human-approved SDLC, use only the Copilot slash commands
+in VS Code as described in the [AI-SDLC Framework Guide](docs/AI-SDLC-Framework-Guide.md).
+The command-line example below is a maintainer smoke test for the legacy
+runner, not an alternative user workflow.
 
 ```bash
 pip install -e .
@@ -793,7 +798,11 @@ Each run writes to `<project.output_dir>/<run-id>/` (default `.agentic_sdlc/runs
 | `release_notes.md` | Delivered and not-delivered requirements |
 | `CONCERN.md` | Only when a concern was raised: the reason the run stopped |
 
-### Command line
+### Legacy CLI reference (maintainers only)
+
+This reference is for maintainers debugging the legacy runner. End users should
+use the Copilot slash commands; do not combine this CLI with the guided
+workflow.
 
 ```text
 python -m agentic_sdlc run --requirements FILE [FILE ...] [--repo PATH] [--config YAML]
@@ -856,6 +865,22 @@ of them can be overridden with `repo.*_command`.
 | Rust | `Cargo.toml` | `cargo build` | `cargo test` | `cargo clippy` |
 | Python | `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements.txt`, or any `.py` | `python -m compileall` | `python -m pytest` | `ruff check .` (if installed) |
 | .NET | `*.sln`, `*.csproj` | `dotnet build` | `dotnet test` | – |
+
+### Enterprise intake and research evidence
+
+Use Copilot Agent in VS Code as the single user-facing workflow. Skills are
+available under `.github/skills/`; start with `/sdlc-orchestrator` or invoke an
+individual stage such as `/requirement`, `/dev-code`, `/dev-testing`,
+`/quality-check`, or `/dev-review`. They run the existing workflow engine
+internally and pause for human decisions. Do not separately run enterprise
+`dev` commands as another workflow. The [AI-SDLC Framework Guide](docs/AI-SDLC-Framework-Guide.md)
+explains setup and use. The [enterprise implementation checklist](docs/enterprise-implementation.md)
+is a maintainer-only reference for backend commands, coverage, and remaining
+work.
+
+The setup wizard saves Jira and Confluence settings in the ignored `.env`
+file. If Jira setup did not save a backlog query, configure `JIRA_JQL` through
+the setup wizard before invoking `/requirement`.
 
 ### Live integrations
 

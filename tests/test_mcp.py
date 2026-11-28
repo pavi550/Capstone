@@ -39,8 +39,8 @@ GITHUB_TOOLS = {
     "commit_file_change", "create_pull_request",
 }
 JIRA_TOOLS = {
-    "list_open_jiras", "create_jira_ticket", "update_jira_fields", "add_jira_comment",
-    "update_jira_status",
+    "list_open_jiras", "get_jira_issue", "create_jira_ticket", "update_jira_fields",
+    "add_jira_comment", "update_jira_status",
 }
 
 
@@ -59,6 +59,7 @@ def test_dotenv_precedence_and_absolute_location(tmp_path, monkeypatch):
     repo.mkdir()
     env_file = repo / ".env"
     env_file.write_text('LLM_MODEL="developer model"\nGOOGLE_API_KEY=file-key\n', encoding="utf-8")
+    monkeypatch.delenv("CAPSTONE_ENV_FILE")
     monkeypatch.setattr(config, "ENV_FILE", env_file)
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("LLM_MODEL", raising=False)
@@ -336,7 +337,8 @@ def test_mcp_stdio_tool_registrations(service, values, expected):
         process = StdioServerParameters(
             command=sys.executable,
             args=[str(config.ENV_FILE.parent / "mcp" / f"{service}_mcp_server.py")],
-            env={**values, "PYTHONPATH": os.environ.get("PYTHONPATH", "")},
+            env={**values, "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
+                 "CAPSTONE_ENV_FILE": os.environ["CAPSTONE_ENV_FILE"]},
         )
         async with (
             stdio_client(process) as (reader, writer),
@@ -367,6 +369,44 @@ def test_rest_result_contract(monkeypatch, service, values, call, response, expe
     assert isinstance(result, str)
     assert expected in result
     assert request.call_args.kwargs["allow_redirects"] is False
+
+
+def test_get_jira_issue_returns_full_description(monkeypatch):
+    monkeypatch.setattr(config, "settings", lambda: JIRA)
+    server = importlib.import_module("jira_mcp_server")
+    description = {
+        "type": "doc",
+        "version": 1,
+        "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Add breed"}]}],
+    }
+    request = Mock(return_value=Mock(
+        status_code=200,
+        json=lambda: {
+            "key": "CP-2",
+            "fields": {"summary": "Add Breed", "description": description, "updated": "2026-11-27T00:00:00Z"},
+        },
+    ))
+    monkeypatch.setattr(server.requests, "get", request)
+
+    result = json.loads(server.get_jira_issue("CP-2"))
+
+    assert result == {
+        "key": "CP-2",
+        "summary": "Add Breed",
+        "description": description,
+        "updated": "2026-11-27T00:00:00Z",
+    }
+    assert request.call_args.args[0].endswith("/rest/api/3/issue/CP-2")
+    assert request.call_args.kwargs["params"] == {"fields": "summary,description,updated"}
+    assert request.call_args.kwargs["allow_redirects"] is False
+
+
+def test_get_jira_issue_rejects_invalid_key(monkeypatch):
+    monkeypatch.setattr(config, "settings", lambda: JIRA)
+    server = importlib.import_module("jira_mcp_server")
+
+    with pytest.raises(server.ToolError, match="Use a Jira issue key"):
+        server.get_jira_issue("CP-2/../../other")
 
 
 @pytest.mark.parametrize("module,entry,values,tool", [

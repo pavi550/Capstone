@@ -1,0 +1,27 @@
+{
+    "evaluator_version":  "synthetic-fixture-v1",
+    "gates":  {
+                  "independent_tests":  {
+                                            "evidence":  [
+                                                             {
+                                                                 "sha256":  "624379d903ac7510517d2fa1fdbc45d82da94aa2500670954aaad42f02408df8",
+                                                                 "path":  "synthetic-check.json"
+                                                             }
+                                                         ],
+                                            "passed":  false
+                                        }
+              },
+    "criteria":  {
+                     "functional_tests":  {
+                                              "method":  "18 of 20 simulated acceptance tests",
+                                              "evidence":  [
+                                                               {
+                                                                   "sha256":  "624379d903ac7510517d2fa1fdbc45d82da94aa2500670954aaad42f02408df8",
+                                                                   "path":  "synthetic-check.json"
+                                                               }
+                                                           ],
+                                              "reason":  "Two simulated failures",
+                                              "ratio":  0.9
+                                          }
+                 }
+}

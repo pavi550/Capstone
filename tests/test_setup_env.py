@@ -51,6 +51,7 @@ def test_configure_ollama_jira_without_sending_requests(monkeypatch, private_env
         "JIRA_BASE_URL": "https://jira.example.test",
         "JIRA_EMAIL": "dev@example.test",
         "JIRA_API_TOKEN": "fixture-token",
+        "JIRA_JQL": 'project = "CP" AND status = "To Do"',
     }
 
 
