@@ -649,6 +649,13 @@ def _dev_cancel(args):
     return store.cancel(args.run_id)
 
 
+def _configured_target_repository(config: Config, requested: Path | None) -> Path:
+    target = requested or config.get("project.target_repository")
+    if not target:
+        raise ValueError("Set CAPSTONE_TARGET_REPO or provide --repo for the target repository")
+    return Path(target).expanduser().resolve()
+
+
 def _dev_workflow(args):
     from contextlib import closing
 
@@ -663,6 +670,10 @@ def _dev_workflow(args):
             raise ValueError("Specify exactly one Jira issue key or an existing --run-id")
         if bool(args.experiment) != bool(args.trial):
             raise ValueError("Specify both --experiment and --trial")
+        if args.experiment:
+            target_repository = (args.experiment / args.trial).resolve()
+        else:
+            target_repository = _configured_target_repository(Config.load(args.config), args.repo)
         trial = None
         if args.experiment:
             experiment = experiments.schedule(store, args.experiment)
@@ -683,7 +694,7 @@ def _dev_workflow(args):
             issue = args.issue
         plan = {
             "issue": issue, "config": str(Path(args.config).resolve()),
-            "repo": str((args.experiment / args.trial if trial else args.repo).resolve()),
+            "repo": str(target_repository),
             "out": str(args.out.resolve()), "acceptance": str(args.acceptance_dir.resolve()),
             "verifier": args.actor, "mode": args.mode,
             "experiment": str(args.experiment.resolve()) if args.experiment else None, "trial": trial,
@@ -1091,7 +1102,7 @@ def _dev_parser(sub):
             workflow.add_argument("--mode", choices=("agent-driven", "agent-assisted", "human-baseline"),
                                   default="agent-driven")
             workflow.add_argument("--config", required=True)
-            workflow.add_argument("--repo", type=Path, required=True)
+            workflow.add_argument("--repo", type=Path, help="override the configured target repository")
             workflow.add_argument("--out", type=Path, required=True)
             workflow.add_argument("--acceptance-dir", type=Path, required=True)
             workflow.add_argument("--actor", required=True, help="configured independent verifier")

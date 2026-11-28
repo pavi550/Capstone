@@ -4,6 +4,7 @@
 
 project:
   name: agentic-sdlc
+  target_repository: null            # local application checkout; CAPSTONE_TARGET_REPO may set it
   output_dir: .agentic_sdlc/runs      # run artifacts: events.jsonl, review-*.json, DoD docs
 
 llm:

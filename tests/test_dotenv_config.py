@@ -7,12 +7,13 @@ from agentic_sdlc.httpclient import basic_auth
 def test_enterprise_reads_use_setup_dotenv_without_yaml(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("CAPSTONE_ENV_FILE")
-    for name in ("JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN", "JIRA_JQL",
+    for name in ("JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN", "JIRA_JQL", "CAPSTONE_TARGET_REPO",
                  "CONFLUENCE_BASE_URL", "CONFLUENCE_EMAIL", "CONFLUENCE_API_TOKEN"):
         monkeypatch.delenv(name, raising=False)
     (tmp_path / ".env").write_text(
         "JIRA_BASE_URL=https://test.atlassian.net\nJIRA_EMAIL=reader@example.org\n"
         "JIRA_API_TOKEN='fixture-${LITERAL}'\nJIRA_JQL='project = CP'\n"
+        "CAPSTONE_TARGET_REPO=../spring-petclinic\n"
         "CONFLUENCE_BASE_URL=https://test.atlassian.net/wiki\n"
         "CONFLUENCE_EMAIL=reader@example.org\nCONFLUENCE_API_TOKEN=page-fixture\n",
         encoding="utf-8",
@@ -38,3 +39,7 @@ def test_enterprise_reads_use_setup_dotenv_without_yaml(tmp_path, monkeypatch, c
     monkeypatch.setenv("JIRA_API_TOKEN", "process-fixture")
     assert Config.load().secret("jira.token_env") == "process-fixture"
     assert Config.load().get("jira.enabled") is False
+    assert Config.load().get("project.target_repository") == "../spring-petclinic"
+    policy = tmp_path / "policy.yaml"
+    policy.write_text("project:\n  target_repository: null\n", encoding="utf-8")
+    assert Config.load(policy).get("project.target_repository") == "../spring-petclinic"

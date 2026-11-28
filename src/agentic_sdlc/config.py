@@ -54,6 +54,8 @@ class Config:
         if values.get("JIRA_API_TOKEN"):
             # Store the environment variable name. The credential stays in the environment.
             settings.setdefault("jira", {})["token_env"] = "JIRA_API_TOKEN"  # nosec B105
+        if values.get("CAPSTONE_TARGET_REPO"):
+            settings.setdefault("project", {})["target_repository"] = values["CAPSTONE_TARGET_REPO"]
         if values.get("CONFLUENCE_BASE_URL"):
             settings["confluence"] = {"base_url": values["CONFLUENCE_BASE_URL"]}
         if local_model and values.get("LLM_PROVIDER") == "openai_compatible" and values.get("LLM_BASE_URL"):
@@ -65,6 +67,9 @@ class Config:
             data = _deep_merge(data, yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {})
         if overrides:
             data = _deep_merge(data, overrides)
+        target_repository = values.get("CAPSTONE_TARGET_REPO")
+        if target_repository and not data.get("project", {}).get("target_repository"):
+            data.setdefault("project", {})["target_repository"] = target_repository
         return cls(data, local)
 
     def with_overrides(self, overrides: dict) -> Config:
