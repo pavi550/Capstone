@@ -1,4 +1,7 @@
 
+import json
+import re
+
 import requests
 from config import jira_settings, settings
 from mcp.server.mcpserver import MCPServer
@@ -70,6 +73,39 @@ def list_open_jiras(project_key: str = "CP") -> str:
         lines.append(f"- [{key}] ({issue_type} | {status}): {summary}")
 
     return "\n".join(lines)
+
+
+@mcp.tool()
+def get_jira_issue(issue_key: str) -> str:
+    """Read a Jira issue's summary, full description, and updated timestamp."""
+    clean_key = issue_key.strip()
+    if not re.fullmatch(r"[A-Z][A-Z0-9_]*-[1-9][0-9]*", clean_key):
+        raise ToolError("Use a Jira issue key, e.g. CP-2")
+
+    response = requests.get(
+        f"{DOMAIN}/rest/api/3/issue/{clean_key}",
+        headers=HEADERS,
+        auth=AUTH,
+        params={"fields": "summary,description,updated"},
+        allow_redirects=False,
+        timeout=15,
+    )
+    _check_jira_response(response, (200,), f"reading Jira issue {clean_key}")
+    issue = response.json()
+    if issue.get("key") != clean_key:
+        raise ToolError("Jira returned a different issue key.")
+    fields = issue.get("fields")
+    if not isinstance(fields, dict):
+        raise ToolError("Jira returned invalid issue fields.")
+    return json.dumps(
+        {
+            "key": clean_key,
+            "summary": fields.get("summary"),
+            "description": fields.get("description"),
+            "updated": fields.get("updated"),
+        },
+        ensure_ascii=False,
+    )
 
 
 @mcp.tool()
