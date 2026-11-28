@@ -688,7 +688,7 @@ def test_unified_workflow_pauses_at_approval_gates_and_orders_ci(tmp_path, monke
         stage = args.dev_command
         calls.append(stage)
         if stage == "testing":
-            receipts["actual_verification"] = {"payload": {"status": "PASSED"}}
+            receipts["actual_verification"] = {"payload": {"status": "PASSED", "checks": []}}
             return receipts["actual_verification"]["payload"]
         if stage == "review":
             receipts["review"] = {"status": "WAITING_REVIEW_APPROVAL"}

@@ -8,7 +8,7 @@ import os
 import re
 import shutil
 import signal
-import subprocess
+import subprocess  # nosec B404
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -46,7 +46,7 @@ def _digest_stream(stream):
 
 
 def _capture(command, *, env, timeout, cleanup):
-    with subprocess.Popen(  # nosec B603 - argument vector built for the trusted local Docker CLI
+    with subprocess.Popen(  # nosec B603
         command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
         start_new_session=os.name == "posix",
     ) as process, ThreadPoolExecutor(max_workers=2) as pool:
@@ -107,13 +107,14 @@ def _container_records(docker, env, host, *, register=None):
             raise ValueError("Invalid owned verifier identity")
         command = [*docker, "ps", "-aq", "--no-trunc", "--filter", f"label=capstone.verifier={name}",
                    "--filter", f"name=^/{name}$"]
-        before = subprocess.run(command, env=env, capture_output=True, text=True, timeout=15, check=True)
+        # Query the trusted Docker CLI with the validated container name and label.
+        before = subprocess.run(command, env=env, capture_output=True, text=True, timeout=15, check=True)  # nosec B603
         container = before.stdout.strip()
         if container:
             if not re.fullmatch(r"[a-f0-9]{64}", container):
                 raise ValueError("Ambiguous owned verifier container")
-            subprocess.run([*docker, "rm", "-f", container], env=env, capture_output=True, timeout=15, check=False)
-        after = subprocess.run(command, env=env, capture_output=True, text=True, timeout=15, check=True)
+            subprocess.run([*docker, "rm", "-f", container], env=env, capture_output=True, timeout=15, check=False)  # nosec B603
+        after = subprocess.run(command, env=env, capture_output=True, text=True, timeout=15, check=True)  # nosec B603
         if after.stdout.strip():
             raise ValueError("Verifier container cleanup remains unresolved")
         with closing(store._connect()) as connection, connection:
@@ -161,7 +162,7 @@ class DockerVerifier:
             private = Path(folder)
             docker = [self.executable, "--config", str(private), "--host", self.host]
             try:
-                info = subprocess.run(  # nosec B603 - fixed read-only Docker server probe
+                info = subprocess.run(  # nosec B603
                     [*docker, "version", "--format", "{{.Server.Os}}"],
                     env=env, capture_output=True, timeout=10, check=False, text=True,
                 )
@@ -193,7 +194,8 @@ class DockerVerifier:
             "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
             "--pids-limit", "128", "--memory", "512m", "--cpus", "1", "--user", "65532:65532",
             "--no-healthcheck", "--log-driver", "none",
-            "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777",
+            # This is an isolated mount inside the container.
+            "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777",  # nosec B108
             "--env", "PYTHONPATH=/artifact", "--env", "PYTHONDONTWRITEBYTECODE=1",
             "--mount", _mount(workspace, "/artifact"), "--workdir", "/artifact",
         ]

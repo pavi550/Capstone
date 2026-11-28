@@ -258,7 +258,7 @@ def _kubernetes_dev(config, environment, deployment, root, binding):
     import base64
     import re
     import shutil
-    import subprocess
+    import subprocess  # nosec B404
 
     from .container_verifier import _environment
     from .development import _manifest
@@ -280,8 +280,11 @@ def _kubernetes_dev(config, environment, deployment, root, binding):
     env = _environment()
 
     def call(arguments, document=None):
-        result = subprocess.run([*argv, *arguments], input=json.dumps(document) if document else None,
-                                env=env, text=True, capture_output=True, timeout=15, check=False)
+        # Invoke the resolved kubectl executable with fixed operations and a separate input stream.
+        result = subprocess.run(  # nosec B603
+            [*argv, *arguments], input=json.dumps(document) if document else None,
+            env=env, text=True, capture_output=True, timeout=15, check=False,
+        )
         if result.returncode:
             raise RuntimeError("Kubernetes DEV operation failed; operator reconciliation may be required")
         return json.loads(result.stdout) if result.stdout.strip() else None
@@ -319,7 +322,7 @@ def _kubernetes_dev(config, environment, deployment, root, binding):
                                     "capabilities": {"drop": ["ALL"]}},
                 "resources": {"limits": {"cpu": "1", "memory": "512Mi"}},
                 "volumeMounts": [{"name": "artifact", "mountPath": "/artifact", "readOnly": True},
-                                 {"name": "scratch", "mountPath": "/tmp"}]}],
+                                 {"name": "scratch", "mountPath": "/tmp"}]}],  # nosec B108
             "volumes": [{"name": "artifact", "configMap": {"name": name, "items": items}},
                         {"name": "scratch", "emptyDir": {"medium": "Memory", "sizeLimit": "64Mi"}}]}}}}
 

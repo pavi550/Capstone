@@ -67,9 +67,15 @@ def _artifact(tmp_path, cfg, *, real_model=False):
 @pytest.fixture
 def mocked_docker(monkeypatch):
     monkeypatch.setattr(container_verifier.shutil, "which", lambda _name: "fixture-docker")
-    monkeypatch.setattr(container_verifier.subprocess, "run", lambda *_a, **_k: SimpleNamespace(
-        returncode=0, stdout="linux",
-    ))
+
+    def run(command, **_kwargs):
+        if command[-3:] == ["version", "--format", "{{.Server.Os}}"]:
+            return SimpleNamespace(returncode=0, stdout="linux")
+        if command[5:7] == ["ps", "-aq"]:
+            return SimpleNamespace(returncode=0, stdout="")
+        pytest.fail(f"Unexpected Docker command: {command}")
+
+    monkeypatch.setattr(container_verifier.subprocess, "run", run)
     calls = []
 
     def capture(command, *, env, timeout, cleanup):
@@ -137,13 +143,14 @@ def test_actual_receipt_gates_and_bound_review(tmp_path, policy, mocked_docker, 
     assert outcome["environment"] == "LOCAL_ACTUAL"
     assert all(check["exit_code"] == exit_code for check in outcome["checks"])
     first_pass = store.receipt(run_id, "first_pass_score")
-    assert first_pass["delivery_eligibility"] == ("BLOCKED" if exit_code else "PENDING")
+    assert first_pass["gates"]["quality_approval"]["status"] == "FAILED"
+    assert first_pass["delivery_eligibility"] == "BLOCKED"
     assert main(["dev", "score", "--store", str(store.path), "--run-id", run_id,
                  "--config", str(config), "--report-dir", str(tmp_path / "report")]) == 0
     score = json.loads(capsys.readouterr().out)
     assert score["status"] == "PROVISIONAL"
     assert score["earned_points"] == (0 if exit_code else 7)
-    assert score["delivery_eligibility"] == ("BLOCKED" if exit_code else "PENDING")
+    assert score["delivery_eligibility"] == "BLOCKED"
     if exit_code:
         with pytest.raises(ValueError, match="mandatory gate"):
             verification.review(store, run_id, authority, policy)

@@ -45,8 +45,9 @@ def reserve(context, config, agent, input_bound, output_bound, rates):
             if scope == "experiment":
                 condition = "run_id IN (SELECT run_id FROM experiment_runs WHERE experiment_id=?)"
                 parameters = (subject,)
+            # Conditions come from fixed SQL fragments and values are bound separately.
             totals = connection.execute(
-                "SELECT COALESCE(SUM(charged_input),0), COALESCE(SUM(charged_output),0), "
+                "SELECT COALESCE(SUM(charged_input),0), COALESCE(SUM(charged_output),0), "  # nosec B608
                 "COALESCE(SUM(charged_cost),0), COUNT(*)-COUNT(charged_cost) FROM provider_requests WHERE "
                 + condition, parameters,
             ).fetchone()

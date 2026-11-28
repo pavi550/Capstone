@@ -52,7 +52,8 @@ class Config:
         if values.get("JIRA_EMAIL"):
             settings.setdefault("jira", {})["user_env"] = "JIRA_EMAIL"
         if values.get("JIRA_API_TOKEN"):
-            settings.setdefault("jira", {})["token_env"] = "JIRA_API_TOKEN"
+            # Store the environment variable name. The credential stays in the environment.
+            settings.setdefault("jira", {})["token_env"] = "JIRA_API_TOKEN"  # nosec B105
         if values.get("CONFLUENCE_BASE_URL"):
             settings["confluence"] = {"base_url": values["CONFLUENCE_BASE_URL"]}
         if local_model and values.get("LLM_PROVIDER") == "openai_compatible" and values.get("LLM_BASE_URL"):
