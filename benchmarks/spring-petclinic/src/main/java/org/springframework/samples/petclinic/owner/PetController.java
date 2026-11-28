@@ -15,12 +15,15 @@
  */
 package org.springframework.samples.petclinic.owner;
 
+import java.beans.PropertyEditorSupport;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.Objects;
 import java.util.Optional;
 
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.ModelMap;
 import org.springframework.util.Assert;
@@ -33,6 +36,8 @@ import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseBody;
+import org.springframework.web.server.ResponseStatusException;
 
 import jakarta.validation.Valid;
 
@@ -94,6 +99,14 @@ class PetController {
 	@InitBinder("pet")
 	public void initPetBinder(WebDataBinder dataBinder) {
 		dataBinder.setValidator(new PetValidator());
+		dataBinder.setRequiredFields("breed", "weight");
+		dataBinder.registerCustomEditor(BigDecimal.class, "weight", new PropertyEditorSupport() {
+			@Override
+			public void setAsText(String text) {
+				setValue(new BigDecimal(text.strip()));
+			}
+		});
+		dataBinder.setAllowedFields("name", "birthDate", "type", "breed", "weight");
 		dataBinder.setDisallowedFields("id", "*.id");
 	}
 
@@ -134,6 +147,20 @@ class PetController {
 		}
 		redirectAttributes.addFlashAttribute("message", "New Pet has been Added");
 		return "redirect:/owners/{ownerId}";
+	}
+
+	@GetMapping(value = "/pets/{petId}", produces = "application/json")
+	@ResponseBody
+	PetProfile petProfile(@ModelAttribute(binding = false) Owner owner, @PathVariable int petId) {
+		Pet pet = owner.getPet(petId);
+		if (pet == null) {
+			throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+		}
+		return new PetProfile(pet.getId(), pet.getName(), pet.getBirthDate(), pet.getType().getName(), pet.getBreed(),
+				pet.getWeight());
+	}
+
+	record PetProfile(Integer id, String name, LocalDate birthDate, String type, String breed, BigDecimal weight) {
 	}
 
 	@GetMapping("/pets/{petId}/edit")
@@ -192,6 +219,8 @@ class PetController {
 			existingPet.setName(pet.getName());
 			existingPet.setBirthDate(pet.getBirthDate());
 			existingPet.setType(pet.getType());
+			existingPet.setBreed(pet.getBreed());
+			existingPet.setWeight(pet.getWeight());
 		}
 		else {
 			owner.addPet(pet);

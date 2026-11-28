@@ -20,9 +20,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.springframework.dao.DataIntegrityViolationException;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.Optional;
+
+import jakarta.persistence.EntityManager;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -83,6 +86,26 @@ class ClinicServiceTests {
 
 	@Autowired
 	protected VetRepository vets;
+
+	@Autowired
+	private EntityManager entityManager;
+
+	@Test
+	void persistsBreedAndWeightAndKeepsLegacyPetsReadable() {
+		Owner owner = this.owners.findById(1).orElseThrow();
+		Pet pet = owner.getPet(1);
+		assertThat(pet.getBreed()).isNull();
+		assertThat(pet.getWeight()).isNull();
+
+		pet.setBreed("Mixed");
+		pet.setWeight(new BigDecimal("0.10"));
+		this.owners.saveAndFlush(owner);
+		this.entityManager.clear();
+
+		Pet reloaded = this.owners.findById(1).orElseThrow().getPet(1);
+		assertThat(reloaded.getBreed()).isEqualTo("Mixed");
+		assertThat(reloaded.getWeight()).isEqualByComparingTo("0.10");
+	}
 
 	private final Pageable pageable = Pageable.unpaged();
 

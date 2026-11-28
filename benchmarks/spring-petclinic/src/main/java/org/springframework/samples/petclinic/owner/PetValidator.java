@@ -15,6 +15,8 @@
  */
 package org.springframework.samples.petclinic.owner;
 
+import java.math.BigDecimal;
+
 import org.springframework.util.StringUtils;
 import org.springframework.validation.Errors;
 import org.springframework.validation.Validator;
@@ -35,6 +37,12 @@ public class PetValidator implements Validator {
 
 	private static final int MAX_NAME_LENGTH = 30;
 
+	private static final int MAX_BREED_LENGTH = 100;
+
+	private static final BigDecimal MIN_WEIGHT = new BigDecimal("0.10");
+
+	private static final BigDecimal MAX_WEIGHT = new BigDecimal("250.00");
+
 	@Override
 	public void validate(Object obj, Errors errors) {
 		Pet pet = (Pet) obj;
@@ -45,6 +53,26 @@ public class PetValidator implements Validator {
 		}
 		else if (name.length() > MAX_NAME_LENGTH) {
 			errors.rejectValue("name", "size", "Name must be no more than 30 characters");
+		}
+
+		String breed = pet.getBreed();
+		if (!errors.hasFieldErrors("breed")) {
+			if (breed == null || breed.codePoints().allMatch(cp -> Character.isWhitespace(cp) || Character.isSpaceChar(cp))) {
+				errors.rejectValue("breed", REQUIRED, "Breed is required");
+			}
+			else if (breed.codePointCount(0, breed.length()) > MAX_BREED_LENGTH) {
+				errors.rejectValue("breed", "size", "Breed must be no more than 100 characters");
+			}
+		}
+
+		BigDecimal weight = pet.getWeight();
+		if (!errors.hasFieldErrors("weight")) {
+			if (weight == null) {
+				errors.rejectValue("weight", REQUIRED, "Weight is required");
+			}
+			else if (weight.compareTo(MIN_WEIGHT) < 0 || weight.compareTo(MAX_WEIGHT) > 0 || weight.scale() > 2) {
+				errors.rejectValue("weight", "range", "Weight must be 0.10 to 250.00 kg with at most two decimal places");
+			}
 		}
 
 		// type validation

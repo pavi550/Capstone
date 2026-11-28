@@ -20,6 +20,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledInNativeImage;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.ComponentScan;
@@ -28,6 +30,7 @@ import org.springframework.test.context.aot.DisabledInAotMode;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
@@ -36,8 +39,11 @@ import org.springframework.dao.DataIntegrityViolationException;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.model;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.view;
@@ -82,6 +88,7 @@ class PetControllerTests {
 		pet.setId(TEST_PET_ID);
 		dog.setId(TEST_PET_ID + 1);
 		pet.setName("petty");
+		pet.setType(cat);
 		dog.setName("doggy");
 		given(this.owners.findById(TEST_OWNER_ID)).willReturn(Optional.of(owner));
 	}
@@ -99,9 +106,54 @@ class PetControllerTests {
 		mockMvc
 			.perform(post("/owners/{ownerId}/pets/new", TEST_OWNER_ID).param("name", "Betty")
 				.param("type", "hamster")
+				.param("breed", "Mixed")
+				.param("weight", "10.50")
 				.param("birthDate", "2015-02-12"))
 			.andExpect(status().is3xxRedirection())
 			.andExpect(view().name("redirect:/owners/{ownerId}"));
+	}
+
+	@Test
+	void rejectsInvalidBreedAndWeightWithoutSaving() throws Exception {
+		mockMvc.perform(post("/owners/{ownerId}/pets/new", TEST_OWNER_ID).param("name", "Betty")
+				.param("type", "hamster").param("birthDate", "2015-02-12").param("breed", " ")
+				.param("weight", "1 2"))
+			.andExpect(model().attributeHasFieldErrors("pet", "breed", "weight"));
+		verify(owners, never()).saveAndFlush(any(Owner.class));
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { "0.09", "250.01", "0.101", "10.000" })
+	void rejectsOutOfRangeOrOverPrecisionWeight(String weight) throws Exception {
+		mockMvc.perform(post("/owners/{ownerId}/pets/new", TEST_OWNER_ID).param("name", "Betty")
+			.param("type", "hamster")
+			.param("birthDate", "2015-02-12")
+			.param("breed", "Mixed")
+			.param("weight", weight))
+			.andExpect(model().attributeHasFieldErrors("pet", "weight"));
+		verify(owners, never()).saveAndFlush(any(Owner.class));
+	}
+
+	@Test
+	void rejectsEditThatOmitsBreedAndWeight() throws Exception {
+		Pet existing = owners.findById(TEST_OWNER_ID).orElseThrow().getPet(TEST_PET_ID);
+		existing.setBreed("Mixed");
+		existing.setWeight(new BigDecimal("10.50"));
+		mockMvc.perform(post("/owners/{ownerId}/pets/{petId}/edit", TEST_OWNER_ID, TEST_PET_ID)
+				.param("name", "petty").param("type", "hamster").param("birthDate", "2015-02-12"))
+			.andExpect(model().attributeHasFieldErrors("pet", "breed", "weight"));
+		verify(owners, never()).saveAndFlush(any(Owner.class));
+	}
+
+	@Test
+	void petProfileReturnsSavedBreedAndWeight() throws Exception {
+		Pet existing = owners.findById(TEST_OWNER_ID).orElseThrow().getPet(TEST_PET_ID);
+		existing.setBreed("Mixed");
+		existing.setWeight(new BigDecimal("10.50"));
+		mockMvc.perform(get("/owners/{ownerId}/pets/{petId}", TEST_OWNER_ID, TEST_PET_ID))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.breed").value("Mixed"))
+			.andExpect(jsonPath("$.weight").value(10.50));
 	}
 
 	@Nested
@@ -169,6 +221,8 @@ class PetControllerTests {
 			mockMvc
 				.perform(post("/owners/{ownerId}/pets/new", TEST_OWNER_ID).param("name", "Betty")
 					.param("type", "hamster")
+					.param("breed", "Mixed")
+					.param("weight", "10.50")
 					.param("birthDate", "2015-02-12"))
 				.andExpect(model().attributeHasNoErrors("owner"))
 				.andExpect(model().attributeHasErrors("pet"))
@@ -193,6 +247,8 @@ class PetControllerTests {
 		mockMvc
 			.perform(post("/owners/{ownerId}/pets/{petId}/edit", TEST_OWNER_ID, TEST_PET_ID).param("name", "Betty")
 				.param("type", "hamster")
+				.param("breed", "Mixed")
+				.param("weight", "10.50")
 				.param("birthDate", "2015-02-12"))
 			.andExpect(status().is3xxRedirection())
 			.andExpect(view().name("redirect:/owners/{ownerId}"));
@@ -206,6 +262,8 @@ class PetControllerTests {
 																														// existing
 																														// pet
 			.param("type", "hamster")
+			.param("breed", "Mixed")
+			.param("weight", "10.50")
 			.param("birthDate", "2015-02-12"))
 			.andExpect(status().is3xxRedirection())
 			.andExpect(view().name("redirect:/owners/{ownerId}"));
@@ -220,6 +278,8 @@ class PetControllerTests {
 				.perform(post("/owners/{ownerId}/pets/{petId}/edit", TEST_OWNER_ID, TEST_PET_ID + 1)
 					.param("name", "petty")
 					.param("type", "hamster")
+					.param("breed", "Mixed")
+					.param("weight", "10.50")
 					.param("birthDate", "2015-02-12"))
 				.andExpect(model().attributeHasNoErrors("owner"))
 				.andExpect(model().attributeHasErrors("pet"))
@@ -260,6 +320,8 @@ class PetControllerTests {
 			mockMvc
 				.perform(post("/owners/{ownerId}/pets/{petId}/edit", TEST_OWNER_ID, TEST_PET_ID).param("name", "Betty")
 					.param("type", "hamster")
+					.param("breed", "Mixed")
+					.param("weight", "10.50")
 					.param("birthDate", "2015-02-12"))
 				.andExpect(model().attributeHasNoErrors("owner"))
 				.andExpect(model().attributeHasErrors("pet"))
