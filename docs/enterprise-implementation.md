@@ -572,6 +572,11 @@ and `OFFLINE_VALIDATED`. Only one development attempt should be recorded.
 For manual runs, set `enterprise.approvers.<actor>` and
 `enterprise.verifiers.<actor>` in a trusted operator YAML to environment
 variable names holding independently generated keys of at least 32 bytes.
+The Capstone team policy at `operator.yaml` allows either `pavi550` or
+`puneethprasad` to approve a draft. In `/requirement`, supply that policy path
+and the actor who is making the decision. The backend checks the signing key
+associated with that actor. Provision each key only to its intended operators
+and to the trusted environment that validates their decisions.
 Pass `--config` to authenticate the requirement decision. Legacy unsigned
 decisions remain viewable but cannot unlock development. Keep the SQLite
 store and keys outside source and generated directories. The verifier JSON
