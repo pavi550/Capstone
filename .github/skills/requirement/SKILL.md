@@ -28,7 +28,7 @@ request or display credentials.
 3. Resolve the target from `CAPSTONE_TARGET_REPO` in the Capstone local
    configuration, or ask for the target path if it is unset. Confirm it is the
    root of the independent Spring PetClinic checkout, not
-   `benchmarks/spring-petclinic/`. Inspect its Git root, current branch, and
+   `repos/spring-petclinic/`. Inspect its Git root, current branch, and
    working-tree changes before editing. Stay on the checked-out branch. Do not
    overwrite existing user changes; if a required file has conflicting local
    edits, stop and ask how to proceed.

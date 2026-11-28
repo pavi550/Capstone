@@ -1,0 +1,97 @@
+/*
+ * Copyright 2012-2025 the original author or authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.springframework.samples.petclinic.owner;
+
+import java.math.BigDecimal;
+
+import org.springframework.util.StringUtils;
+import org.springframework.validation.Errors;
+import org.springframework.validation.Validator;
+
+/**
+ * <code>Validator</code> for <code>Pet</code> forms.
+ * <p>
+ * We're not using Bean Validation annotations here because it is easier to define such
+ * validation rule in Java.
+ * </p>
+ *
+ * @author Ken Krebs
+ * @author Juergen Hoeller
+ */
+public class PetValidator implements Validator {
+
+	private static final String REQUIRED = "required";
+
+	private static final int MAX_NAME_LENGTH = 30;
+
+	private static final int MAX_BREED_LENGTH = 100;
+
+	private static final BigDecimal MIN_WEIGHT = new BigDecimal("0.10");
+
+	private static final BigDecimal MAX_WEIGHT = new BigDecimal("250.00");
+
+	@Override
+	public void validate(Object obj, Errors errors) {
+		Pet pet = (Pet) obj;
+		String name = pet.getName();
+		// name validation
+		if (!StringUtils.hasText(name)) {
+			errors.rejectValue("name", REQUIRED, REQUIRED);
+		}
+		else if (name.length() > MAX_NAME_LENGTH) {
+			errors.rejectValue("name", "size", "Name must be no more than 30 characters");
+		}
+
+		String breed = pet.getBreed();
+		if (!errors.hasFieldErrors("breed")) {
+			if (breed == null || breed.codePoints().allMatch(cp -> Character.isWhitespace(cp) || Character.isSpaceChar(cp))) {
+				errors.rejectValue("breed", REQUIRED, "Breed is required");
+			}
+			else if (breed.codePointCount(0, breed.length()) > MAX_BREED_LENGTH) {
+				errors.rejectValue("breed", "size", "Breed must be no more than 100 characters");
+			}
+		}
+
+		BigDecimal weight = pet.getWeight();
+		if (!errors.hasFieldErrors("weight")) {
+			if (weight == null) {
+				errors.rejectValue("weight", REQUIRED, "Weight is required");
+			}
+			else if (weight.compareTo(MIN_WEIGHT) < 0 || weight.compareTo(MAX_WEIGHT) > 0 || weight.scale() > 2) {
+				errors.rejectValue("weight", "range", "Weight must be 0.10 to 250.00 kg with at most two decimal places");
+			}
+		}
+
+		// type validation
+		if (pet.isNew() && pet.getType() == null) {
+			errors.rejectValue("type", REQUIRED, REQUIRED);
+		}
+
+		// birth date validation
+		if (pet.getBirthDate() == null) {
+			errors.rejectValue("birthDate", REQUIRED, REQUIRED);
+		}
+	}
+
+	/**
+	 * This Validator validates *just* Pet instances
+	 */
+	@Override
+	public boolean supports(Class<?> clazz) {
+		return Pet.class.isAssignableFrom(clazz);
+	}
+
+}

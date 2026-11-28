@@ -457,8 +457,8 @@ code in Capstone. Generated notes and reports stay outside PetClinic. This
 pre-review slash-command flow is separate from the legacy enterprise CLI
 lifecycle, which retains its own earlier digest-bound approval gates.
 
-The target is the root of the PetClinic checkout, not its nested
-`benchmarks/spring-petclinic/` reference snapshot. This workflow does not claim
+Use the independent PetClinic checkout as the target. Capstone stores a
+reference snapshot at `repos/spring-petclinic/`. This workflow does not claim
 that a Jira ticket is complete or that code was merged or deployed merely
 because a draft was generated.
 

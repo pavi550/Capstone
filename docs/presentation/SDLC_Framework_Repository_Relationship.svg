@@ -39,7 +39,7 @@
   <rect x="795" y="98" width="190" height="54" rx="7" class="tile"/>
   <text x="890" y="121" text-anchor="middle" class="label">Multi-LLM orchestration</text>
   <text x="890" y="139" text-anchor="middle" class="small muted">provider only when authorized</text>
-  <text x="590" y="183" text-anchor="middle" class="small muted">Framework code and configuration stay in this repository</text>
+  <text x="590" y="183" text-anchor="middle" class="small muted">Framework code, configuration, and reference snapshot (repos/spring-petclinic/)</text>
 
   <rect x="15" y="82" width="130" height="78" rx="9" class="panel"/>
   <text x="80" y="110" text-anchor="middle" class="label" font-weight="700">Jira</text>
@@ -67,10 +67,6 @@
   <text x="275" y="450" text-anchor="middle" class="repo-title">Spring PetClinic</text>
   <text x="275" y="479" text-anchor="middle" class="label">Application source · tests · build · CI</text>
   <text x="275" y="503" text-anchor="middle" class="small muted">Development target: repository root</text>
-  <rect x="82" y="530" width="386" height="75" rx="8" fill="#ffffff" stroke="#86efac" stroke-dasharray="6 5"/>
-  <text x="275" y="554" text-anchor="middle" class="small" font-weight="700">Benchmark reference snapshot</text>
-  <text x="275" y="576" text-anchor="middle" class="small muted">benchmarks/spring-petclinic/ · not the live target</text>
-  <text x="275" y="594" text-anchor="middle" class="small muted">ordinary files, not a nested Git repository</text>
   <text x="275" y="644" text-anchor="middle" class="small muted">Existing checkout branch and remote are preserved</text>
 
   <rect x="545" y="392" width="460" height="280" rx="12" class="panel other"/>

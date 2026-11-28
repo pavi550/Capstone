@@ -232,9 +232,8 @@ tests/                              unit, integration, and workflow tests
 ## 11. Spring PetClinic example
 
 Keep Capstone and Spring PetClinic as separate Git checkouts. The PetClinic
-checkout is the development target; the benchmark snapshot is stored inside
-that checkout at `benchmarks/spring-petclinic/`, not inside the Capstone
-repository. Do not initialize a nested Git repository or use the benchmark
+checkout is the development target. Capstone stores the reference snapshot
+at `repos/spring-petclinic/`. Do not initialize a nested Git repository or use the benchmark
 snapshot as the live target.
 
 From the Capstone repository root, set `CAPSTONE_TARGET_REPO=../spring-petclinic`
@@ -247,9 +246,9 @@ For example, with sibling checkouts:
 ```text
 Capstone-workspace/
 ├── Capstone/          # SDLC framework Git repository
+?   └── repos/
+?       └── spring-petclinic/  # reference snapshot
 └── spring-petclinic/  # target application Git repository
-    └── benchmarks/
-        └── spring-petclinic/  # benchmark reference snapshot
 ```
 
 Run the framework from its repository root. Keep framework run artifacts in

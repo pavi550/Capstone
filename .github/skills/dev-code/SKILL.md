@@ -13,7 +13,7 @@ Use the acceptance criteria already established in the current conversation.
 If they are missing, ask for the Jira issue key or user-authored criteria;
 never invent requirements. Use the target configured by
 `CAPSTONE_TARGET_REPO`, or ask for a path if it is unset. Confirm the target
-is the PetClinic checkout root, not its nested benchmark snapshot.
+is the root of the independent PetClinic checkout.
 
 Before editing, inspect the target Git root, branch, status, and diffs for
 files in scope. Work on the existing branch. Preserve unrelated local changes.
