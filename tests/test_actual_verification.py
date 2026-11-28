@@ -224,7 +224,8 @@ def test_disposable_unified_local_workflow_corrects_and_resumes(tmp_path, policy
     cfg = policy.with_overrides({"jira": {"issues_file": str(issues)}, "llm": {
         "provider": "openai", "base_url": "http://127.0.0.1:11434/v1",
         "api_key_env": "UNIFIED_FIXTURE_MODEL", "model": "fixture",
-    }, "enterprise": {"delivery_policy": {"local_review": {
+    }, "project": {"target_repository": str(source)},
+        "enterprise": {"delivery_policy": {"local_review": {
         "required": True, "reference_dir": str(references),
     }}}})
     config.write_text(json.dumps(cfg.data), encoding="utf-8")
@@ -266,7 +267,7 @@ def test_disposable_unified_local_workflow_corrects_and_resumes(tmp_path, policy
     monkeypatch.setattr(verification, "local_review_evaluation", supply_reference)
     db = tmp_path / "unified.db"
     assert main(["dev", "workflow-start", "DEMO-42", "--store", str(db), "--config", str(config),
-                 "--repo", str(source), "--out", str(tmp_path / "out"), "--acceptance-dir", str(acceptance),
+                 "--out", str(tmp_path / "out"), "--acceptance-dir", str(acceptance),
                  "--actor", "verifier", "--allow-provider"]) == 0
     initial = json.loads(capsys.readouterr().out)
     assert initial["stage"] == "requirements"

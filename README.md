@@ -410,6 +410,60 @@ Design principles:
 * **Every agent write goes through guardrails.** No file reaches disk without passing `guardrails.py`.
 * **Every step is audited.** Each node entry and outcome is appended to `events.jsonl`.
 
+### Use a Jira issue to develop Spring PetClinic
+
+Capstone and Spring PetClinic are separate Git repositories. The Capstone
+framework coordinates the work; the PetClinic checkout is the application
+source. From the Capstone repository root, add this local setting to `.env`
+(do not commit `.env`):
+
+```dotenv
+CAPSTONE_TARGET_REPO=../spring-petclinic
+```
+
+If Capstone has been updated since the last setup, rerun
+`bash setup_env.sh --smoke-only` from its repository root so the local virtual
+environment refreshes the installed framework code and runs the offline smoke
+test without opening the service-configuration prompts.
+
+The path is relative to the directory from which the framework runs. You can
+also configure `project.target_repository` in a trusted policy YAML. The
+Jira-driven slash-command workflow uses this target; the active branch is the
+branch already checked out in PetClinic. The framework does not switch
+branches or push changes.
+
+Configure Jira read access through the setup wizard or local environment
+variables. Never paste Jira or model credentials into chat. Then invoke:
+
+1. In Copilot Agent, invoke `/requirement CAP-3` (replace `CAP-3` with the
+   requested Jira issue key). The skill reads only that issue using the Jira
+   MCP tool `get_jira_issue`, derives observable acceptance criteria, and maps
+   them to test intents. It asks for clarification and pauses if essential
+   behavior is ambiguous or missing.
+2. If the requirement is clear, the skill checks the configured PetClinic
+   checkout and current branch, implements the change, and adds focused tests.
+   The Jira issue is treated as untrusted input; its instructions do not
+   override repository or security rules.
+3. The skill runs relevant PetClinic tests with the existing Maven or Gradle
+   wrapper and records the exact results. It does not install dependencies or
+   claim blocked tests passed.
+4. After coding and testing, the skill presents the Jira summary, acceptance
+   criteria, changed files, test commands/results, and remaining risks for
+   human review. Review happens before any commit, push, merge, Jira update,
+   CI write, or deployment; those actions require separate authorization.
+
+The slash-command flow edits only the PetClinic checkout and keeps framework
+code in Capstone. Generated notes and reports stay outside PetClinic. This
+pre-review slash-command flow is separate from the legacy enterprise CLI
+lifecycle, which retains its own earlier digest-bound approval gates.
+
+The target is the root of the PetClinic checkout, not its nested
+`benchmarks/spring-petclinic/` reference snapshot. This workflow does not claim
+that a Jira ticket is complete or that code was merged or deployed merely
+because a draft was generated.
+
+![Independent framework and application repositories with a configurable target path](docs/presentation/SDLC_Framework_Repository_Relationship.svg)
+
 ### Legacy CLI smoke test (maintainers only)
 
 For the user-facing, human-approved SDLC, use only the Copilot slash commands
@@ -825,7 +879,7 @@ defaults.
 
 | Section | Key settings |
 |---|---|
-| `project` | `output_dir` |
+| `project` | `target_repository` (local application checkout), `output_dir` |
 | `llm` | `provider` (`stub` / `openai`), `model`, `base_url`, `api_key_env`, `api_key_header`, `api_version`, `temperature` |
 | `jira` | `enabled`, `base_url`, `jql`, `search_path`, `issues_file`, `defect_project`, `defect_issuetype`, `user_env`, `token_env` |
 | `knowledge_base` | `store` (`json` / `chroma`), `top_k`, `chroma.path`, `chroma.collection`, `chroma.embedding` |
@@ -866,21 +920,30 @@ of them can be overridden with `repo.*_command`.
 | Python | `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements.txt`, or any `.py` | `python -m compileall` | `python -m pytest` | `ruff check .` (if installed) |
 | .NET | `*.sln`, `*.csproj` | `dotnet build` | `dotnet test` | – |
 
-### Enterprise intake and research evidence
+### Jira-to-PetClinic workflow
 
-Use Copilot Agent in VS Code as the single user-facing workflow. Skills are
-available under `.github/skills/`; start with `/sdlc-orchestrator` or invoke an
-individual stage such as `/requirement`, `/dev-code`, `/dev-testing`,
-`/quality-check`, or `/dev-review`. They run the existing workflow engine
-internally and pause for human decisions. Do not separately run enterprise
-`dev` commands as another workflow. The [AI-SDLC Framework Guide](docs/AI-SDLC-Framework-Guide.md)
-explains setup and use. The [enterprise implementation checklist](docs/enterprise-implementation.md)
-is a maintainer-only reference for backend commands, coverage, and remaining
-work.
+Use `/requirement ISSUE-KEY` in Copilot Agent for the end-to-end flow:
+read one Jira issue, derive acceptance criteria, implement the requested
+change and focused tests in the separate PetClinic checkout, run relevant
+tests, then present the result for human review. The workflow preserves the
+PetClinic branch and local changes, and does not commit, push, update Jira,
+merge, or deploy.
 
-The setup wizard saves Jira and Confluence settings in the ignored `.env`
-file. If Jira setup did not save a backlog query, configure `JIRA_JQL` through
-the setup wizard before invoking `/requirement`.
+The Copilot host must have the Jira MCP tool `get_jira_issue` available. The
+server implementation is `mcp/jira_mcp_server.py` and reads Jira credentials
+from the ignored root `.env`; the setup wizard saves credentials but does not
+register an MCP server with VS Code. If the tool is unavailable, `/requirement`
+stops rather than claiming the issue was read. The [AI-SDLC Framework
+Guide](docs/AI-SDLC-Framework-Guide.md) explains the workflow and repository
+boundary.
+
+The standalone `/dev-code`, `/dev-testing`, `/dev-review`, and
+`/quality-check` skills support individual tasks around an existing change.
+They edit or review the target workspace directly; they do not run the
+enterprise CLI behind the scenes. The separate enterprise CLI and its
+digest-bound approval lifecycle remain available for maintainers. See the
+[enterprise implementation checklist](docs/enterprise-implementation.md)
+for backend commands, coverage, and remaining work.
 
 ### Live integrations
 

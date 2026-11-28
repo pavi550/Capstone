@@ -3,14 +3,11 @@
 This guide explains how to set up and use the Capstone AI-SDLC framework. It is
 written for both operators and people new to software development.
 
-> **Use one interface:** run the SDLC from Copilot Agent in VS Code using the
-> slash commands listed in this guide. Start with `/sdlc-orchestrator`, or
-> invoke an individual stage such as `/requirement` or `/dev-code`. The
-> framework runs its command-line engine behind the scenes; users should not
-> run a second set of `agentic_sdlc dev` commands. Skill names are lowercase
-> and hyphenated, so `/devCode`, `/devtesting`, `/qualityCheck`, and
-> `/devreview` are `/dev-code`, `/dev-testing`, `/quality-check`, and
-> `/dev-review`.
+> For the Jira-driven PetClinic workflow, invoke `/requirement ISSUE-KEY` in
+> Copilot Agent. The skill reads Jira, derives acceptance criteria, implements
+> and tests the change in the separate PetClinic checkout, then pauses for
+> human review. The enterprise CLI remains a separate workflow with its own
+> digest-bound approval gates. Skill names are lowercase and hyphenated.
 
 ## 1. What the framework is for
 
@@ -30,12 +27,12 @@ evidence, and keep human approval and independent verification meaningful.
 | Need | What exists in this repository | Boundary to keep in mind |
 |---|---|---|
 | Environment setup | `setup_env.sh` installs Python dependencies, runs an offline smoke test, then offers optional service configuration. Copilot skills are in `.github/skills/`. | Setup does not install VS Code or configure Jira unless selected. |
-| Jira requirements | `/requirement` reads the configured Jira issue and prepares a digest-bound requirement draft. | This guide does not verify the live Jira account, project permissions, or current backlog. A ticket needs acceptance criteria; provide missing criteria in the Copilot conversation. |
-| Coding and tests | The slash-command workflow creates isolated code and test drafts, integrates them into a manifest, and pauses for human approval before testing. | Code/test generation is independent but concurrent; inspect and approve the combined artifact before execution. Test files follow the repository's existing framework; the agent does not install dependencies or rewrite protected framework configuration. |
-| Testing | `/dev-testing` runs independent build, lint, and test checks and records artifact-bound outcomes. | Verification evidence must come from an independent trusted verifier; agent generation itself does not execute the generated code. |
-| Security and pattern review | `/dev-review` gathers security, pattern, and configured model findings for human review. | Review results are not ground truth. Independent adjudication is required to measure missed bugs and false findings reliably. |
-| Human approvals | The slash-command workflow pauses for digest-bound requirement, development, quality, and final review decisions. | Approvals are recorded by the internal engine using the configured local policy. A conversational response is not a replacement for required setup or identity separation. |
-| Merge, CI, deployment | The workflow records merge, CI/regression, and per-environment deployment gates for human authorization. | Defaults are intentionally conservative: VCS and deployment are dry-run. A dry-run is not a merge or deployment. |
+| Jira requirements | `/requirement ISSUE-KEY` reads one issue with `get_jira_issue` and derives observable acceptance criteria. | The Jira MCP tool must be available to Copilot. If it is unavailable or the issue is unclear, stop before editing. |
+| Coding and tests | The requirement workflow changes the separate PetClinic checkout and adds focused tests. | Preserve existing edits, stay on the checked-out branch, and keep framework files in Capstone. |
+| Testing | Relevant PetClinic tests run after implementation and before human review. | Report exact commands and pass/fail/blocked results; never present a blocked test as passing. |
+| Security and pattern review | `/dev-review` provides read-only advisory findings when requested. | Findings are not ground truth; the human reviewer makes the final decision. |
+| Human review | The requirement workflow presents the issue, criteria, diff, test evidence, branch, and risks after tests. | Human review does not authorize commits, pushes, Jira updates, merges, or deployments. |
+| Enterprise CLI, CI, deployment | The separate enterprise CLI retains its digest-bound approval and delivery lifecycle. | Do not mix its stored run and approval receipts with the direct slash-command PetClinic workflow. |
 | Enterprise measurements | Workflow receipts and reports support evidence-based scoring and comparisons. | Missing or unlabelled evidence remains unknown; generated scores alone do not prove product quality or productivity improvement. |
 
 ## 3. Set up the environment
@@ -61,106 +58,61 @@ The wizard can configure the Atlassian site
 `https://capstoneprojectgrp4.atlassian.net/`, but the URL alone does not grant
 access. You need an authorized Atlassian account and API token.
 
-After setup, open the repository in VS Code, start Copilot Agent chat, and use
-the slash commands below. The command-line engine and its configuration are
-used internally by those skills; you do not need to launch a separate SDLC
-command in a terminal.
+After setup, open the repository in VS Code and start Copilot Agent chat. The
+Jira-driven slash command uses the available Jira MCP tool and edits the
+configured PetClinic checkout directly; it does not run the enterprise CLI
+workflow engine.
 
 ## 4. A layman's view of the flow
 
 Think of a requirement as a promise, a test as a check of that promise, and a
 review as a second opinion:
 
-1. **Choose the work item.** Find the Jira ticket or write down the requested
-   change.
-2. **Make it testable.** Each acceptance criterion should describe an outcome
-   that a person can check. Resolve ambiguity with the product owner before
-   asking an agent to code.
-3. **Approve the specification.** Confirm the ticket, scope, and criteria are
-   correct. A wrong or incomplete requirement produces misleading code and
-   tests.
-4. **Generate code and tests separately.** The coding agent owns production
-   files; the testing agent owns test files. Neither should be told to conceal
-   defects or to make a review pass.
-5. **Inspect the proposed changes.** A human reads the requirement, code diff,
-   tests, and any guardrail warnings before execution or approval.
-6. **Run checks in order.** Execute the relevant tests and repository
-   regression checks. Record pass/fail results against each requirement and
-   fix failures with bounded retries.
-7. **Review and decide.** Combine automated security/pattern findings with
-   independent human review. Fix blockers and re-review; a human decides
-   whether the exact reviewed changes are accepted.
-8. **Merge and deploy only after approval.** Run CI/regression checks, route
-   failures to defect handling, and request a separate deployment approval.
-   Dry-run output is a plan, not a completed release.
-9. **Keep the evidence.** Link criteria to code and tests, record metrics and
-   decisions, and publish Definition of Done and release notes only when the
-   lifecycle reaches the appropriate stage.
+1. **Provide a Jira issue key.** Invoke `/requirement ISSUE-KEY`; the skill
+   reads only that issue through Jira MCP.
+2. **Make the request testable.** The skill derives observable acceptance
+   criteria. If key behavior is missing or ambiguous, it asks for clarification
+   and pauses before edits.
+3. **Implement and test.** The skill checks the independent PetClinic checkout,
+   preserves its existing work and branch, adds a focused change and tests,
+   then runs relevant project tests.
+4. **Review and decide.** After tests, the skill presents the Jira summary,
+   criteria, diff, exact test results, branch, and remaining risks. A human
+   decides whether to approve, reject, or request changes.
+5. **Deliver separately.** Commits, pushes, Jira updates, merges, and
+   deployments are not part of this flow and require separate authorization.
 
 ## 5. Run the workflow with Copilot slash commands
 
-The slash commands are the single user-facing workflow. They guide Copilot
-through Jira intake, code and test generation, independent verification,
-quality review, and final review. The underlying CLI, saved workflow state,
-artifact digests, and approval receipts are implementation details run by the
-skills, not a second set of commands for the user.
+Invoke `/requirement ISSUE-KEY` for the end-to-end Jira-to-PetClinic flow.
+`/dev-code` and `/dev-testing` can also be invoked separately when acceptance
+criteria and a change already exist. `/dev-review` is read-only advisory
+review, and `/quality-check` presents the final human review packet.
 
-Start with `/sdlc-orchestrator` for guided end-to-end use, or invoke the
-individual skill for the stage you want:
-
-1. `/requirement CP-101` reads the configured Jira issue, identifies testable
-   acceptance criteria, and pauses for your decision. If criteria are missing
-   or ambiguous, provide the product decision in chat before approving.
-2. `/dev-code RUN_ID` creates isolated production-code and test drafts from the
-   approved requirement, shows the combined artifact digest, and pauses for
-   your inspection and approval.
-3. `/dev-testing RUN_ID` runs independent checks only after development
-   approval. It reports results and pauses rather than deciding whether the
-   quality evidence is acceptable.
-4. `/quality-check RUN_ID` presents the evidence and asks you to approve or
-   reject the exact quality result.
-5. `/dev-review RUN_ID` runs security, pattern, and configured model review,
-   presents findings, and pauses for your decision.
-
-If a stage fails or is rejected, the workflow stops. Requesting a correction
-must be explicit; one correction cycle is bounded and returns the changed
-artifact to the required approval and verification gates. Merge, CI writes,
-and deployment require separate authorization.
-
-The regular `run` path remains in the repository for compatibility and
-maintainer testing. It is not an alternate user workflow for the approval-
-gated SDLC described here.
+The enterprise CLI (`agentic_sdlc run` and its staged commands) remains
+available for its separate digest-bound approval lifecycle. Do not describe
+that lifecycle as running behind the slash skills or use its approval receipts
+for direct workspace edits.
 
 ## 6. Copilot slash commands and human checkpoints
 
 The repository includes user-invoked skills in `.github/skills/`. Open the
-repository in VS Code, start an Agent chat, and type `/` to find them. Each
-skill is explicitly user-invoked, asks for missing inputs, displays its
-output, and stops for a human decision before advancing. If the skills do not
-appear, verify that the Copilot harness supports workspace skills and start a
-new chat. A rejection or cancellation must stop the workflow without
-pretending the stage succeeded.
+repository in VS Code, start an Agent chat, and type `/` to find them. The
+end-to-end `/requirement` skill pauses for ambiguity before editing and for
+human review after tests. If the skills do not appear, verify that the Copilot
+harness supports workspace skills and start a new chat.
 
 | Command | Skill file | Agent responsibility | Required human decision before next stage |
 |---|---|---|---|
-| `/sdlc-orchestrator` | `sdlc-orchestrator/SKILL.md` | Coordinate the operator through the SDLC without auto-approving or silently advancing. | Explicit decision at every stage and before any external write. |
-| `/requirement CP-101` | `requirement/SKILL.md` | Read Jira and draft a digest-bound requirement. | Confirm scope and criteria; persist approval/rejection against the exact specification digest. |
-| `/dev-code RUN_ID` | `dev-code/SKILL.md` | Start integrated code/test generation for the approved specification. | Inspect and approve/reject the exact combined manifest digest. |
-| `/dev-testing RUN_ID` | `dev-testing/SKILL.md` | Resume the approved run and execute independent verification. | Inspect recorded checks and evidence; then use `/quality-check` for the decision. |
-| `/quality-check RUN_ID` | `quality-check/SKILL.md` | Review recorded quality results and the first-pass score. | Approve/reject the exact verification digest. |
-| `/dev-review RUN_ID` | `dev-review/SKILL.md` | Run security, pattern, and configured model review after quality approval. | Inspect findings and approve/reject the exact review digest. |
+| `/sdlc-orchestrator` | `sdlc-orchestrator/SKILL.md` | Coordinate the Jira-to-PetClinic sequence through tests and final review. | Clarify ambiguous requirements before editing; human reviews after testing. |
+| `/requirement ISSUE-KEY` | `requirement/SKILL.md` | Read one Jira issue, derive criteria, implement and test in PetClinic. | Human reviews the complete change and evidence after tests. |
+| `/dev-code` | `dev-code/SKILL.md` | Implement established acceptance criteria and add focused tests. | Preserve user changes; tests are run by `/dev-testing` or `/requirement`. |
+| `/dev-testing` | `dev-testing/SKILL.md` | Run relevant project tests and report exact outcomes. | Report failures and blocked checks accurately. |
+| `/quality-check` | `quality-check/SKILL.md` | Present a read-only final human review packet. | Human decides approve, reject, or request changes. |
+| `/dev-review` | `dev-review/SKILL.md` | Provide read-only advisory findings. | Human makes the final decision. |
 
-All stages are independently triggerable, but they continue the same approved
-requirement and workflow run. The coordinator skill directs the process; it
-does not programmatically dispatch other skills. A later agent must not
-silently replace an earlier accepted artifact. The human can request a
-bounded correction or stop at every stage. No agent may auto-approve its own
-work.
-
-The workflow's first-pass score records check outcomes before quality
-approval; the final score includes later approval and validation gates. Do not
-treat either score as proof that all requirement criteria are satisfied
-without examining the underlying checks and traceability evidence.
+These slash skills operate directly on the workspace and are distinct from
+the enterprise CLI's stored runs, scores, and approval receipts.
 
 ### Keeping coding and testing independent
 
@@ -274,25 +226,60 @@ src/agentic_sdlc/docs.py            traceability, DoD, and release-note generati
 src/agentic_sdlc/sdlc.yaml          packaged defaults and guardrail/retry policy
 docs/enterprise-implementation.md   enterprise workflow status, commands, limitations
 examples/                           sample requirements, repos, and offline fixtures
-benchmarks/spring-petclinic/        Spring PetClinic reference project
 tests/                              unit, integration, and workflow tests
 ```
 
 ## 11. Spring PetClinic example
 
-Use PetClinic as a **target application example**, not as a claim that the
-repository already contains a PetClinic Jira ticket or that the live Jira
-project is connected. First inspect the target project's conventions and use
-a disposable copy. Ask the product owner for exact behaviors; for instance,
-a request could be to validate a new owner contact field. The actual ticket
-must specify permitted formats, required/optional behavior, error response,
-and persistence expectations before code is generated.
+Keep Capstone and Spring PetClinic as separate Git checkouts. The PetClinic
+checkout is the development target; the benchmark snapshot is stored inside
+that checkout at `benchmarks/spring-petclinic/`, not inside the Capstone
+repository. Do not initialize a nested Git repository or use the benchmark
+snapshot as the live target.
 
-Write one criterion per observable behavior, then map each to test scenarios:
-valid input, invalid input, boundary values, and regression behavior. Keep the
-acceptance tests in a trusted directory separate from generated output. Use
-`/requirement`, `/dev-code`, `/dev-testing`, `/quality-check`, and
-`/dev-review` to advance through the approval gates. This is a usage pattern;
+From the Capstone repository root, set `CAPSTONE_TARGET_REPO=../spring-petclinic`
+in the local `.env` file. The approval-bound `workflow-start` uses this target
+when `--repo` is omitted; an explicit `--repo` overrides it. Relative paths
+are resolved from the directory where the framework command runs.
+
+For example, with sibling checkouts:
+
+```text
+Capstone-workspace/
+├── Capstone/          # SDLC framework Git repository
+└── spring-petclinic/  # target application Git repository
+    └── benchmarks/
+        └── spring-petclinic/  # benchmark reference snapshot
+```
+
+Run the framework from its repository root. Keep framework run artifacts in
+the framework checkout; the default `.agentic_sdlc/runs/` location is relative
+to the current directory. For the legacy CLI, specify both paths explicitly:
+
+```bash
+cd Capstone
+python -m agentic_sdlc run --requirements PATH/TO/REQUIREMENTS.md \
+  --repo ../spring-petclinic --out .agentic_sdlc/runs
+```
+
+For the Jira-driven slash-command workflow, invoke `/requirement ISSUE-KEY`.
+It reads the issue with the Jira MCP tool, derives acceptance criteria,
+implements the requested change in the configured PetClinic checkout, runs
+relevant tests, then presents the result for human review. It pauses earlier
+if the issue is ambiguous or the target has conflicting local edits. The
+separate enterprise CLI workflow retains its own digest-bound stage approvals;
+do not mix that lifecycle with the direct slash-command workflow.
+
+Before generating code, inspect the target project's conventions and get
+specific acceptance criteria from the product owner. For example, a request
+could validate a new owner contact field; the ticket must specify permitted
+formats, required/optional behavior, error response, and persistence
+expectations.
+
+Write one criterion per observable behavior, then map each to relevant test
+scenarios such as valid input, invalid input, boundary values, and regression
+behavior. `/requirement` performs this mapping, changes the configured
+PetClinic checkout, and runs tests before human review. This is a usage pattern;
 it does not assert a particular PetClinic feature or test result.
 
 ## 12. Further reading

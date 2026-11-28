@@ -1,42 +1,28 @@
 ---
 name: dev-testing
-description: Run independent verification for a human-approved integrated artifact.
+description: Run the target application's relevant tests before presenting the change for human review.
 disable-model-invocation: true
 ---
 
-# Independent testing and quality gate
+# Application testing
 
-Use this skill only when a person explicitly invokes `/dev-testing`. Continue
-the integrated enterprise workflow only after the human has approved its
-combined code/test manifest. Treat approved acceptance criteria as the test
-oracle. Do not rely on the coding agent's explanation, make tests artificially
-pass, weaken assertions, or suppress/skip failing tests.
+Use this skill only when a person explicitly invokes `/dev-testing`, or as
+the testing stage of `/requirement`. Testing is performed after the code and
+focused tests are generated, but before the final human review.
 
-Run the backend operations yourself. Do not ask the user to run or copy
-`agentic_sdlc` commands, and do not show command syntax or flags in chat.
-Communicate only the next slash-command action.
+Resolve the same target repository used by `/dev-code`. Verify the current
+branch and working tree; do not switch branches or overwrite files. Inspect
+the project's existing test and build instructions and use its checked-in
+wrapper. Do not install dependencies, alter build files, suppress checks, or
+edit tests simply to get a passing result.
 
-Ask for the workflow `run_id`, approval store, trusted policy YAML, verifier
-identity, independent acceptance-test directory, and whether configured model
-use was authorized for the workflow. Confirm the integrated artifact and its
-development approval are present before running checks.
+For Spring PetClinic, Java 17 or newer is required. Run the relevant focused
+tests first when practical, then the relevant Maven or Gradle suite. Capture
+the exact command, exit status, and meaningful output. If Java, Docker, a
+service, or another prerequisite is unavailable, state which checks were
+blocked and why; never report blocked or skipped checks as passing.
 
-Resume the enterprise workflow to run independent checks:
-
-```text
-python -m agentic_sdlc dev workflow-resume --store STORE --run-id RUN_ID
-```
-
-If the run used a configured provider, use it only when it was explicitly
-authorized and used when starting the workflow. The stored
-workflow plan supplies its original acceptance directory and verifier
-identity; do not substitute a different test target. Report each recorded
-check, pass/fail outcome, evidence, and verification digest. Stop at
-`quality: WAITING_FOR_APPROVAL`. Do not make a quality decision; direct the
-user to `/quality-check` to inspect and decide on the recorded evidence.
-If checks fail, stop at the correction pause. Ask the human to explicitly
-authorize a correction before allowing the model to modify the artifact.
-Record the authorization internally; do not ask the user to run a CLI flag.
-
-Do not modify code or tests, skip failing checks, or claim review/deployment
-approval.
+Report test results against the acceptance criteria. Do not edit application
+code in this skill. Return the target branch, changed-file list, commands,
+pass/fail/blocked results, and remaining gaps to the calling workflow. The
+human review happens after this report.

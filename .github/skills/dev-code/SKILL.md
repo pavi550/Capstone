@@ -1,52 +1,31 @@
 ---
 name: dev-code
-description: Generate and present the integrated code/test artifact for human approval.
+description: Implement Jira-backed acceptance criteria in the configured application repository.
 disable-model-invocation: true
 ---
 
-# Integrated development artifact
+# Application implementation
 
-Use this skill only when a person explicitly invokes `/dev-code`. Do not
-broaden the approved requirement. The enterprise workflow creates production
-code and independent tests in isolated workspaces; do not use the standalone
-`dev code` draft command for the approval-bound workflow.
+Use this skill only when a person explicitly invokes `/dev-code`, or as the
+implementation stage of `/requirement`. Do not broaden the Jira requirement.
 
-Run the backend operations yourself. Do not ask the user to run or copy
-`agentic_sdlc` commands, and do not show command syntax or flags in chat.
-Communicate only the next slash-command action.
+Use the acceptance criteria already established in the current conversation.
+If they are missing, ask for the Jira issue key or user-authored criteria;
+never invent requirements. Use the target configured by
+`CAPSTONE_TARGET_REPO`, or ask for a path if it is unset. Confirm the target
+is the PetClinic checkout root, not its nested benchmark snapshot.
 
-Ask for the approved requirement `run_id`, approval store, trusted policy
-YAML, source repository path, separate output directory, trusted independent
-acceptance-test directory, verifier identity, and whether the user explicitly
-authorizes a configured model provider. Do not request API keys in chat.
+Before editing, inspect the target Git root, branch, status, and diffs for
+files in scope. Work on the existing branch. Preserve unrelated local changes.
+If an in-scope file has conflicting user changes, stop and ask before editing.
 
-First confirm that the stored requirement is approved:
+Implement the narrowest change that satisfies the acceptance criteria. Add or
+update focused tests that cover each criterion and relevant edge cases. Keep
+framework files in Capstone and application code/tests in PetClinic. Do not
+commit, push, switch branches, edit Jira, modify CI/secrets, or change build
+configuration unless the requirement specifically calls for it and the user
+authorizes it.
 
-```text
-python -m agentic_sdlc dev status --store STORE --run-id RUN_ID
-```
-
-Start the integrated code-and-test generation using the existing approved
-specification:
-
-```text
-python -m agentic_sdlc dev workflow-start --run-id RUN_ID --store STORE --config POLICY --repo SOURCE --out OUTPUT --acceptance-dir ACCEPTANCE_DIR --actor VERIFIER
-```
-
-Add `--allow-provider` only after the user explicitly authorizes use of the
-configured provider. Show the approved requirement, combined manifest digest,
-code and test file paths, output workspace, and workflow status. Stop at
-`WAITING_FOR_APPROVAL`. Ask the user to inspect the exact integrated artifact.
-Only after explicit approval record the decision:
-
-```text
-python -m agentic_sdlc dev approve --store STORE --run-id RUN_ID --development-sha256 MANIFEST_SHA256 --stage development --actor APPROVER --config POLICY
-```
-
-For rejection, record the user's reason against the same digest. If the user
-requests a model-backed correction, obtain explicit confirmation and record
-the authorization internally, then use the same provider authorization used
-at workflow start. This authorizes one bounded correction cycle, creates a new
-manifest, and returns to this approval gate. Do not run testing, review,
-merge, or deployment from this skill. Do not claim tests passed or release
-gates were satisfied.
+Do not run generated tests in this skill. Hand the changed files and
+acceptance-to-test mapping to `/dev-testing`. The end-to-end `/requirement`
+workflow runs testing next, then presents the combined result to the human.

@@ -1,6 +1,6 @@
 import json
 
-from conftest import EXAMPLES, make_cfg, run_flow
+from conftest import EXAMPLES, make_cfg, run_flow, write_requirements
 
 from agentic_sdlc.cli import main
 from agentic_sdlc.hitl import HITL
@@ -77,3 +77,21 @@ def test_cli_run_returns_zero(tmp_path, repo, capsys):
                  "--config", str(cfg_file), "--out", str(tmp_path / "runs")])
     assert code == 0
     assert "finished at 'end'" in capsys.readouterr().out
+
+
+def test_default_artifacts_stay_outside_separate_target_repo(tmp_path, monkeypatch, repo, cfg):
+    framework_root = tmp_path / "Capstone"
+    framework_root.mkdir()
+    monkeypatch.chdir(framework_root)
+    reqs = write_requirements(tmp_path)
+
+    state = Orchestrator(cfg).run([reqs], repo)
+
+    output = state.out_dir.resolve()
+    assert output.is_relative_to((framework_root / ".agentic_sdlc" / "runs").resolve())
+    assert not output.is_relative_to(repo.resolve())
+    assert (state.out_dir / "events.jsonl").is_file()
+
+
+def test_petclinic_benchmark_is_not_vendored_in_framework():
+    assert not (EXAMPLES.parent / "benchmarks" / "spring-petclinic").exists()
